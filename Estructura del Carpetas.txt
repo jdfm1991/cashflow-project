@@ -1,0 +1,38 @@
+C:\Apache24\htdocs\cashflow-project\
+│
+├── cashflow-backend\
+│   ├── public\
+│   │   ├── index.php
+│   │   ├── .htaccess
+│   │   └── test.php
+│   │
+│   ├── app\
+│   │   ├── Config\
+│   │   ├── Controllers\
+│   │   ├── Models\
+│   │   ├── Services\
+│   │   ├── Middleware\
+│   │   ├── Helpers\
+│   │   └── Exceptions\
+│   │
+│   ├── storage\
+│   │   ├── logs\                 ← Logs del sistema
+│   │   ├── uploads\              ← Directorio base para uploads
+│   │   │   ├── bank_statements\  ← ESTADOS DE CUENTA SUBIDOS
+│   │   │   ├── temp\             ← Archivos temporales
+│   │   │   └── exports\          ← Reportes exportados
+│   │   │
+│   │   └── cache\                ← Cache del sistema
+│   │
+│   ├── vendor\                   ← Dependencias de Composer
+│   ├── .env                      ← Variables de entorno
+│   └── composer.json
+│
+└── cashflow-frontend\
+    ├── index.html
+    ├── test-connection.html
+    ├── components\
+    ├── assets\
+    ├── modules\
+    ├── services\
+    └── utils\

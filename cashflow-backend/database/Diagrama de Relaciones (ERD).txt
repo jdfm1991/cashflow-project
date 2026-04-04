@@ -1,0 +1,35 @@
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│     users       │     │   categories    │     │    accounts     │
+├─────────────────┤     ├─────────────────┤     ├─────────────────┤
+│ id (PK)         │     │ id (PK)         │     │ id (PK)         │
+│ username        │     │ user_id (FK)    │─────│ user_id (FK)    │
+│ email           │     │ name            │     │ name            │
+│ password_hash   │     │ type            │     │ type            │
+│ full_name       │     │ icon            │     │ category        │
+│ role            │     │ color           │     │ description     │
+│ is_active       │     │ is_system       │     │ initial_balance │
+│ ...             │     │ ...             │     │ current_balance │
+└────────┬────────┘     └─────────────────┘     └────────┬────────┘
+         │                                              │
+         │                                              │
+         ▼                                              ▼
+┌─────────────────┐                           ┌─────────────────┐
+│   incomes       │                           │    expenses     │
+├─────────────────┤                           ├─────────────────┤
+│ id (PK)         │                           │ id (PK)         │
+│ user_id (FK)    │◄──────┐                   │ user_id (FK)    │
+│ account_id (FK) │───────┤                   │ account_id (FK) │
+│ amount          │       │                   │ amount          │
+│ date            │       │                   │ date            │
+│ description     │       │                   │ description     │
+│ reference       │       │                   │ reference       │
+└─────────────────┘       │                   └─────────────────┘
+                          │
+┌─────────────────┐       │     ┌─────────────────┐
+│ refresh_tokens  │       │     │ password_resets │
+├─────────────────┤       │     ├─────────────────┤
+│ id (PK)         │       │     │ id (PK)         │
+│ user_id (FK)    │───────┘     │ user_id (FK)    │
+│ token           │             │ token           │
+│ expires_at      │             │ expires_at      │
+└─────────────────┘             └─────────────────┘

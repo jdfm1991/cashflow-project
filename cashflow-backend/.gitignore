@@ -1,0 +1,22 @@
+# Dependencias
+/vendor/
+
+# Variables de entorno
+.env
+
+# Logs
+/storage/logs/*.log
+
+# Archivos subidos temporales
+/storage/uploads/*
+
+# Reportes generados
+/storage/exports/*
+
+# Configuración IDE
+.vscode/
+.idea/
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db

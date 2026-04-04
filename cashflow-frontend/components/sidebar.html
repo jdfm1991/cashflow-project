@@ -1,0 +1,535 @@
+<!-- Botón toggle para móvil (debe estar fuera del sidebar) -->
+<button class="mobile-menu-toggle" id="mobileMenuToggle" style="display: none;">
+    <i class="bi bi-list"></i>
+</button>
+<!-- Versión con menú desplegable -->
+<nav class="sidebar" id="sidebar">
+    <div class="sidebar-header d-flex justify-content-between align-items-center p-3">
+        <h4 class="text-white mb-0">FlowControl</h4>
+        <button class="btn-close btn-close-white d-md-none" id="closeSidebarBtn" aria-label="Cerrar menú"></button>
+    </div>
+
+    <!-- Menú Público (visible cuando NO está autenticado) -->
+    <ul class="nav flex-column" id="publicMenu">
+        <li class="nav-item">
+            <a href="#dashboard" class="nav-link" id="publicDashboardLink">
+                <i class="bi bi-speedometer2 me-2"></i>
+                <span>Dashboard</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a href="#" class="nav-link" id="showLoginBtn">
+                <i class="bi bi-box-arrow-in-right me-2"></i>
+                <span>Iniciar Sesión</span>
+            </a>
+        </li>
+    </ul>
+
+    <!-- Menú Privado (visible cuando está autenticado) -->
+    <ul class="nav flex-column" id="privateMenu" style="display: none;">
+
+        <!-- ============================================ -->
+        <!-- DASHBOARD -->
+        <!-- ============================================ -->
+        <li class="nav-item">
+            <a href="#dashboard" class="nav-link">
+                <i class="bi bi-speedometer2 me-2"></i>
+                <span>Dashboard</span>
+            </a>
+        </li>
+
+        <!-- ============================================ -->
+        <!-- SECCIÓN: ADMINISTRACIÓN (Solo super_admin) -->
+        <!-- ============================================ -->
+        <li class="nav-item super-admin-only" style="display: none;">
+            <div class="nav-section-header" data-section="admin">
+                <i class="bi bi-shield-lock me-2"></i>
+                <span>ADMINISTRACIÓN</span>
+                <i class="bi bi-chevron-down ms-auto"></i>
+            </div>
+            <ul class="nav flex-column section-content" id="section-admin" style="display: none;">
+                <li class="nav-item">
+                    <a href="#companies" class="nav-link">
+                        <i class="bi bi-building me-2"></i>
+                        <span>Empresas</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#users" class="nav-link">
+                        <i class="bi bi-people me-2"></i>
+                        <span>Usuarios</span>
+                    </a>
+                </li>
+            </ul>
+        </li>
+
+        <!-- ============================================ -->
+        <!-- SECCIÓN: CONFIGURACIÓN -->
+        <!-- ============================================ -->
+        <li class="nav-item config-only">
+            <div class="nav-section-header" data-section="config">
+                <i class="bi bi-gear me-2"></i>
+                <span>CONFIGURACIÓN</span>
+                <i class="bi bi-chevron-down ms-auto"></i>
+            </div>
+            <ul class="nav flex-column section-content" id="section-config" style="display: none;">
+                <li class="nav-item">
+                    <a href="#currencies" class="nav-link">
+                        <i class="bi bi-currency-exchange me-2"></i>
+                        <span>Monedas</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#exchange-rates" class="nav-link">
+                        <i class="bi bi-graph-up me-2"></i>
+                        <span>Tasas de Cambio</span>
+                    </a>
+                </li>
+            </ul>
+        </li>
+
+        <!-- ============================================ -->
+        <!-- SECCIÓN: BANCOS -->
+        <!-- ============================================ -->
+        <li class="nav-item banks-only">
+            <div class="nav-section-header" data-section="banks">
+                <i class="bi bi-bank me-2"></i>
+                <span>BANCOS</span>
+                <i class="bi bi-chevron-down ms-auto"></i>
+            </div>
+            <ul class="nav flex-column section-content" id="section-banks" style="display: none;">
+                <li class="nav-item super-admin-only" style="display: none;">
+                    <a href="#banks" class="nav-link">
+                        <i class="bi bi-building me-2"></i>
+                        <span>Catálogo de Bancos</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#bank-accounts" class="nav-link">
+                        <i class="bi bi-wallet2 me-2"></i>
+                        <span>Cuentas Bancarias</span>
+                    </a>
+                </li>
+            </ul>
+        </li>
+
+        <!-- ============================================ -->
+        <!-- SECCIÓN: CATÁLOGOS -->
+        <!-- ============================================ -->
+        <li class="nav-item catalogs-only" style="display: block;">
+            <div class="nav-section-header" data-section="catalogs">
+                <i class="bi bi-book me-2"></i>
+                <span>CATÁLOGOS</span>
+                <i class="bi bi-chevron-down ms-auto"></i>
+            </div>
+            <ul class="nav flex-column section-content" id="section-catalogs" style="display: none;">
+                <li class="nav-item">
+                    <a href="#accounts" class="nav-link">
+                        <i class="bi bi-bookshelf me-2"></i>
+                        <span>Cuentas Contables</span>
+                    </a>
+                </li>
+            </ul>
+        </li>
+
+        <!-- ============================================ -->
+        <!-- SECCIÓN: TRANSACCIONES -->
+        <!-- ============================================ -->
+        <li class="nav-item transactions-only">
+            <div class="nav-section-header" data-section="transactions">
+                <i class="bi bi-arrow-left-right me-2"></i>
+                <span>TRANSACCIONES</span>
+                <i class="bi bi-chevron-down ms-auto"></i>
+            </div>
+            <ul class="nav flex-column section-content" id="section-transactions" style="display: none;">
+                <li class="nav-item">
+                    <a href="#income" class="nav-link">
+                        <i class="bi bi-cash-stack me-2"></i>
+                        <span>Ingresos</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#expense" class="nav-link">
+                        <i class="bi bi-cash me-2"></i>
+                        <span>Egresos</span>
+                    </a>
+                </li>
+            </ul>
+        </li>
+
+        <!-- ============================================ -->
+        <!-- SECCIÓN: HERRAMIENTAS -->
+        <!-- ============================================ -->
+        <li class="nav-item tools-only">
+            <div class="nav-section-header" data-section="tools">
+                <i class="bi bi-tools me-2"></i>
+                <span>HERRAMIENTAS</span>
+                <i class="bi bi-chevron-down ms-auto"></i>
+            </div>
+            <ul class="nav flex-column section-content" id="section-tools" style="display: none;">
+                <li class="nav-item">
+                    <a href="#statements" class="nav-link">
+                        <i class="bi bi-file-earmark-spreadsheet me-2"></i>
+                        <span>Carga Masiva</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#reports" class="nav-link">
+                        <i class="bi bi-file-earmark-text me-2"></i>
+                        <span>Reportes</span>
+                    </a>
+                </li>
+            </ul>
+        </li>
+
+    </ul>
+</nav>
+
+<!-- Overlay para móvil -->
+<div id="sidebarOverlay" class="sidebar-overlay"></div>
+
+<style>
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100vh;
+        width: 280px;
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        color: #e2e8f0;
+        transition: transform 0.3s ease-in-out;
+        z-index: 1050;
+        overflow-y: auto;
+        box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+    }
+
+    @media (min-width: 768px) {
+        .sidebar {
+            transform: translateX(0) !important;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+        }
+    }
+
+    @media (max-width: 767.98px) {
+        .sidebar {
+            transform: translateX(-100%);
+            width: 280px;
+        }
+
+        .sidebar.open {
+            transform: translateX(0) !important;
+        }
+
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1040;
+        }
+
+        .sidebar-overlay.open {
+            display: block;
+        }
+    }
+
+    .sidebar-header {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        margin-bottom: 1rem;
+    }
+
+    /* Estilos para los encabezados de sección */
+    .nav-section-header {
+        color: #cbd5e1;
+        padding: 0.6rem 1rem;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 0.75rem;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        background-color: rgba(0, 0, 0, 0.2);
+        margin-top: 0.5rem;
+    }
+
+    .nav-section-header:hover {
+        background-color: rgba(59, 130, 246, 0.2);
+        color: white;
+    }
+
+    .nav-section-header i:first-child {
+        width: 24px;
+        font-size: 0.9rem;
+    }
+
+    .nav-section-header .bi-chevron-down,
+    .nav-section-header .bi-chevron-up {
+        transition: transform 0.2s ease;
+    }
+
+    .section-content {
+        background-color: rgba(0, 0, 0, 0.15);
+        padding-left: 1rem;
+    }
+
+    .section-content .nav-link {
+        padding: 0.5rem 1rem;
+        font-size: 0.85rem;
+    }
+
+    .section-content .nav-link i {
+        width: 20px;
+        font-size: 0.9rem;
+    }
+
+    .sidebar .nav-link {
+        color: #cbd5e1;
+        padding: 0.6rem 1rem;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+        border-radius: 0;
+    }
+
+    .sidebar .nav-link:hover {
+        background-color: rgba(59, 130, 246, 0.2);
+        color: white;
+        padding-left: 1.5rem;
+    }
+
+    .sidebar .nav-link.active {
+        background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);
+        color: white;
+        border-left: 4px solid #ffffff;
+    }
+
+    .sidebar .nav-link i {
+        width: 24px;
+        font-size: 1.1rem;
+    }
+
+    .sidebar hr {
+        margin: 0.5rem 0;
+        opacity: 0.3;
+    }
+
+    .mobile-menu-toggle {
+        position: fixed;
+        top: 15px;
+        left: 15px;
+        z-index: 1060;
+        background: #1e293b;
+        border: none;
+        color: white;
+        width: 45px;
+        height: 45px;
+        border-radius: 8px;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    }
+
+    @media (max-width: 767.98px) {
+        .mobile-menu-toggle {
+            display: flex;
+        }
+
+        .main-content {
+            width: 100%;
+            margin-left: 0;
+            padding-top: 60px;
+        }
+    }
+</style>
+
+<script>
+    (function () {
+        let isInitialized = false;
+
+        function initSidebar() {
+            if (isInitialized) return;
+            isInitialized = true;
+
+            console.log('Inicializando sidebar...');
+
+            // Obtener elementos
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            const closeBtn = document.getElementById('closeSidebarBtn');
+            let toggleBtn = document.getElementById('mobileMenuToggle');
+
+            // Crear botón toggle si no existe
+            if (!toggleBtn) {
+                toggleBtn = document.createElement('button');
+                toggleBtn.id = 'mobileMenuToggle';
+                toggleBtn.className = 'mobile-menu-toggle';
+                toggleBtn.innerHTML = '<i class="bi bi-list"></i>';
+                document.body.appendChild(toggleBtn);
+            }
+
+            // Función para abrir sidebar
+            function openSidebar() {
+                if (sidebar) sidebar.classList.add('open');
+                if (overlay) overlay.classList.add('open');
+                document.body.style.overflow = 'hidden';
+            }
+
+            // Función para cerrar sidebar
+            function closeSidebar() {
+                if (sidebar) sidebar.classList.remove('open');
+                if (overlay) overlay.classList.remove('open');
+                document.body.style.overflow = '';
+            }
+
+            // Evento del botón toggle
+            toggleBtn.onclick = function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Toggle button clicked');
+                openSidebar();
+            };
+
+            // Evento del botón cerrar
+            if (closeBtn) {
+                closeBtn.onclick = function (e) {
+                    e.preventDefault();
+                    closeSidebar();
+                };
+            }
+
+            // Evento del overlay
+            if (overlay) {
+                overlay.onclick = function () {
+                    closeSidebar();
+                };
+            }
+
+            // Cerrar al hacer clic en un enlace (móvil)
+            const navLinks = document.querySelectorAll('.sidebar .nav-link');
+            navLinks.forEach(link => {
+                link.addEventListener('click', function () {
+                    if (window.innerWidth < 768) {
+                        closeSidebar();
+                    }
+                });
+            });
+
+            // Cerrar al redimensionar a desktop
+            window.addEventListener('resize', function () {
+                if (window.innerWidth >= 768) {
+                    closeSidebar();
+                } else {
+                    // Asegurar que el botón sea visible en móvil
+                    toggleBtn.style.display = 'flex';
+                }
+            });
+
+            // Inicializar secciones desplegables
+            initSections();
+
+            console.log('Sidebar inicializado correctamente');
+        }
+
+        function saveSectionState(sectionId, isOpen) {
+            localStorage.setItem(`sidebar_section_${sectionId}`, isOpen ? 'open' : 'closed');
+        }
+
+        function loadSectionState(sectionId) {
+            return localStorage.getItem(`sidebar_section_${sectionId}`) === 'open';
+        }
+
+        function initSections() {
+            const sections = document.querySelectorAll('.nav-section-header');
+
+            sections.forEach(header => {
+                const sectionId = header.dataset.section;
+                const content = document.getElementById(`section-${sectionId}`);
+                const chevron = header.querySelector('.bi-chevron-down, .bi-chevron-up');
+
+                if (!content) return;
+
+                const wasOpen = loadSectionState(sectionId);
+
+                if (wasOpen) {
+                    content.style.display = 'block';
+                    if (chevron) {
+                        chevron.classList.remove('bi-chevron-down');
+                        chevron.classList.add('bi-chevron-up');
+                    }
+                } else {
+                    content.style.display = 'none';
+                    if (chevron) {
+                        chevron.classList.remove('bi-chevron-up');
+                        chevron.classList.add('bi-chevron-down');
+                    }
+                }
+
+                // Remover event listener anterior para evitar duplicados
+                const newHeader = header.cloneNode(true);
+                header.parentNode.replaceChild(newHeader, header);
+
+                newHeader.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const sectionContent = document.getElementById(`section-${sectionId}`);
+                    const sectionChevron = newHeader.querySelector('.bi-chevron-down, .bi-chevron-up');
+                    const isOpen = sectionContent.style.display === 'block';
+
+                    if (isOpen) {
+                        sectionContent.style.display = 'none';
+                        if (sectionChevron) {
+                            sectionChevron.classList.remove('bi-chevron-up');
+                            sectionChevron.classList.add('bi-chevron-down');
+                        }
+                        saveSectionState(sectionId, false);
+                    } else {
+                        sectionContent.style.display = 'block';
+                        if (sectionChevron) {
+                            sectionChevron.classList.remove('bi-chevron-down');
+                            sectionChevron.classList.add('bi-chevron-up');
+                        }
+                        saveSectionState(sectionId, true);
+                    }
+                });
+            });
+        }
+
+        function updateSectionsByRole(userRole) {
+            const isSuperAdmin = userRole === 'super_admin';
+            const isAuthenticated = !!localStorage.getItem('access_token');
+
+            const catalogsSection = document.querySelector('.catalogs-only');
+            const adminSection = document.querySelector('.super-admin-only');
+
+            if (isAuthenticated) {
+                if (catalogsSection) catalogsSection.style.display = isSuperAdmin ? 'block' : 'none';
+                if (adminSection) adminSection.style.display = isSuperAdmin ? 'block' : 'none';
+            } else {
+                if (catalogsSection) catalogsSection.style.display = 'none';
+                if (adminSection) adminSection.style.display = 'none';
+            }
+        }
+
+        window.updateMenuByRole = function (userRole) {
+            console.log('updateMenuByRole called with role:', userRole);
+            updateSectionsByRole(userRole);
+            setTimeout(initSections, 50);
+        };
+
+        // Inicializar cuando el DOM esté listo
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initSidebar);
+        } else {
+            initSidebar();
+        }
+    })();
+</script>

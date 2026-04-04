@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test de Conexión API - CashFlow</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f5f5f5;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .test-card {
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .test-card .card-header {
+            background-color: #f8f9fa;
+            border-bottom: 2px solid #dee2e6;
+            font-weight: bold;
+        }
+        pre {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 10px;
+            max-height: 300px;
+            overflow: auto;
+            font-size: 12px;
+        }
+        .status-badge {
+            font-size: 14px;
+            padding: 5px 10px;
+        }
+        .api-url {
+            font-family: monospace;
+            color: #0d6efd;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container py-4">
+        <div class="text-center mb-4">
+            <h1 class="display-5">🧪 Test de Conexión API</h1>
+            <p class="text-muted">Verificar comunicación entre Frontend y Backend</p>
+            <div class="alert alert-info">
+                <strong>Backend URL:</strong> <code id="apiUrl">http://localhost:8000</code>
+                <button class="btn btn-sm btn-outline-secondary ms-2" onclick="changeApiUrl()">Cambiar URL</button>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- Test 1: Health Check -->
+            <div class="col-md-6">
+                <div class="card test-card">
+                    <div class="card-header">
+                        <span class="badge bg-primary status-badge">TEST 1</span>
+                        GET /api/health
+                    </div>
+                    <div class="card-body">
+                        <p>Verificar que la API está funcionando correctamente.</p>
+                        <button id="testHealth" class="btn btn-primary w-100">
+                            <i class="bi bi-heart"></i> Probar Health Check
+                        </button>
+                        <div id="healthResult" class="mt-3">
+                            <pre class="text-muted">Esperando prueba...</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Test 2: Version -->
+            <div class="col-md-6">
+                <div class="card test-card">
+                    <div class="card-header">
+                        <span class="badge bg-info status-badge">TEST 2</span>
+                        GET /api/version
+                    </div>
+                    <div class="card-body">
+                        <p>Obtener versión de la API.</p>
+                        <button id="testVersion" class="btn btn-info w-100 text-white">
+                            <i class="bi bi-tag"></i> Probar Versión
+                        </button>
+                        <div id="versionResult" class="mt-3">
+                            <pre class="text-muted">Esperando prueba...</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Test 3: Login -->
+            <div class="col-md-6">
+                <div class="card test-card">
+                    <div class="card-header">
+                        <span class="badge bg-success status-badge">TEST 3</span>
+                        POST /api/auth/login
+                    </div>
+                    <div class="card-body">
+                        <p>Iniciar sesión con credenciales de prueba.</p>
+                        <div class="mb-2">
+                            <label class="form-label small">Usuario / Email</label>
+                            <input type="text" id="loginUser" class="form-control form-control-sm" value="demo@cashflow.com">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small">Contraseña</label>
+                            <input type="password" id="loginPass" class="form-control form-control-sm" value="demo123">
+                        </div>
+                        <button id="testLogin" class="btn btn-success w-100">
+                            <i class="bi bi-box-arrow-in-right"></i> Probar Login
+                        </button>
+                        <div id="loginResult" class="mt-3">
+                            <pre class="text-muted">Esperando prueba...</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Test 4: Dashboard (Requiere Token) -->
+            <div class="col-md-6">
+                <div class="card test-card">
+                    <div class="card-header">
+                        <span class="badge bg-warning status-badge">TEST 4</span>
+                        GET /api/dashboard/stats
+                    </div>
+                    <div class="card-body">
+                        <p>Obtener estadísticas del dashboard (requiere autenticación).</p>
+                        <div class="mb-2">
+                            <label class="form-label small">Token de acceso</label>
+                            <textarea id="accessToken" class="form-control form-control-sm" rows="2" placeholder="Token aparecerá aquí después del login..."></textarea>
+                        </div>
+                        <button id="testDashboard" class="btn btn-warning w-100" disabled>
+                            <i class="bi bi-speedometer2"></i> Probar Dashboard
+                        </button>
+                        <div id="dashboardResult" class="mt-3">
+                            <pre class="text-muted">Primero debe iniciar sesión...</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Test 5: Cuentas -->
+            <div class="col-md-6">
+                <div class="card test-card">
+                    <div class="card-header">
+                        <span class="badge bg-secondary status-badge">TEST 5</span>
+                        GET /api/accounts
+                    </div>
+                    <div class="card-body">
+                        <p>Listar cuentas del usuario autenticado.</p>
+                        <button id="testAccounts" class="btn btn-secondary w-100" disabled>
+                            <i class="bi bi-bank"></i> Probar Cuentas
+                        </button>
+                        <div id="accountsResult" class="mt-3">
+                            <pre class="text-muted">Primero debe iniciar sesión...</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Test 6: Ingresos -->
+            <div class="col-md-6">
+                <div class="card test-card">
+                    <div class="card-header">
+                        <span class="badge bg-success status-badge">TEST 6</span>
+                        GET /api/incomes
+                    </div>
+                    <div class="card-body">
+                        <p>Listar ingresos del usuario autenticado.</p>
+                        <button id="testIncomes" class="btn btn-success w-100" disabled>
+                            <i class="bi bi-cash-stack"></i> Probar Ingresos
+                        </button>
+                        <div id="incomesResult" class="mt-3">
+                            <pre class="text-muted">Primero debe iniciar sesión...</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Resumen de pruebas -->
+        <div class="card mt-4">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0">📊 Resumen de Pruebas</h5>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-3">
+                        <div class="border rounded p-2">
+                            <h6>Health Check</h6>
+                            <span id="statusHealth" class="badge bg-secondary">Pendiente</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="border rounded p-2">
+                            <h6>Versión</h6>
+                            <span id="statusVersion" class="badge bg-secondary">Pendiente</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="border rounded p-2">
+                            <h6>Login</h6>
+                            <span id="statusLogin" class="badge bg-secondary">Pendiente</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="border rounded p-2">
+                            <h6>Autenticación</h6>
+                            <span id="statusAuth" class="badge bg-secondary">Pendiente</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuración
+        let API_URL = localStorage.getItem('api_url') || 'http://localhost:8000';
+        let ACCESS_TOKEN = null;
+
+        // Mostrar URL actual
+        document.getElementById('apiUrl').textContent = API_URL;
+
+        // Función para cambiar URL de la API
+        window.changeApiUrl = function() {
+            const newUrl = prompt('Ingrese la URL del backend:', API_URL);
+            if (newUrl && newUrl.trim()) {
+                API_URL = newUrl.trim();
+                localStorage.setItem('api_url', API_URL);
+                document.getElementById('apiUrl').textContent = API_URL;
+                alert(`URL actualizada a: ${API_URL}`);
+            }
+        };
+
+        // Helper para hacer peticiones
+        async function apiRequest(endpoint, options = {}) {
+            const url = `${API_URL}/${endpoint}`;
+            const defaultOptions = {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            };
+            
+            if (ACCESS_TOKEN && !options.noAuth) {
+                defaultOptions.headers['Authorization'] = `Bearer ${ACCESS_TOKEN}`;
+            }
+            
+            const finalOptions = { ...defaultOptions, ...options };
+            
+            try {
+                const response = await fetch(url, finalOptions);
+                const data = await response.json();
+                return {
+                    ok: response.ok,
+                    status: response.status,
+                    data: data
+                };
+            } catch (error) {
+                return {
+                    ok: false,
+                    status: 0,
+                    error: error.message,
+                    data: null
+                };
+            }
+        }
+
+        // Actualizar estado de botones según autenticación
+        function updateAuthStatus() {
+            const hasToken = !!ACCESS_TOKEN;
+            document.getElementById('testDashboard').disabled = !hasToken;
+            document.getElementById('testAccounts').disabled = !hasToken;
+            document.getElementById('testIncomes').disabled = !hasToken;
+            
+            if (hasToken) {
+                document.getElementById('statusAuth').className = 'badge bg-success';
+                document.getElementById('statusAuth').textContent = 'Autenticado';
+            } else {
+                document.getElementById('statusAuth').className = 'badge bg-secondary';
+                document.getElementById('statusAuth').textContent = 'No autenticado';
+            }
+        }
+
+        // Test 1: Health Check
+        document.getElementById('testHealth').addEventListener('click', async () => {
+            const resultDiv = document.getElementById('healthResult');
+            const statusSpan = document.getElementById('statusHealth');
+            
+            resultDiv.innerHTML = '<pre>Cargando...</pre>';
+            
+            const response = await apiRequest('api/health', { noAuth: true });
+            
+            if (response.ok) {
+                statusSpan.className = 'badge bg-success';
+                statusSpan.textContent = 'OK';
+                resultDiv.innerHTML = `<pre class="text-success">✅ Éxito (${response.status})\n${JSON.stringify(response.data, null, 2)}</pre>`;
+            } else {
+                statusSpan.className = 'badge bg-danger';
+                statusSpan.textContent = 'Error';
+                resultDiv.innerHTML = `<pre class="text-danger">❌ Error (${response.status})\n${JSON.stringify(response.data || {error: response.error}, null, 2)}</pre>`;
+            }
+        });
+
+        // Test 2: Version
+        document.getElementById('testVersion').addEventListener('click', async () => {
+            const resultDiv = document.getElementById('versionResult');
+            const statusSpan = document.getElementById('statusVersion');
+            
+            resultDiv.innerHTML = '<pre>Cargando...</pre>';
+            
+            const response = await apiRequest('api/version', { noAuth: true });
+            
+            if (response.ok) {
+                statusSpan.className = 'badge bg-success';
+                statusSpan.textContent = 'OK';
+                resultDiv.innerHTML = `<pre class="text-success">✅ Éxito (${response.status})\n${JSON.stringify(response.data, null, 2)}</pre>`;
+            } else {
+                statusSpan.className = 'badge bg-danger';
+                statusSpan.textContent = 'Error';
+                resultDiv.innerHTML = `<pre class="text-danger">❌ Error (${response.status})\n${JSON.stringify(response.data || {error: response.error}, null, 2)}</pre>`;
+            }
+        });
+
+        // Test 3: Login
+        document.getElementById('testLogin').addEventListener('click', async () => {
+            const username = document.getElementById('loginUser').value;
+            const password = document.getElementById('loginPass').value;
+            const resultDiv = document.getElementById('loginResult');
+            const statusSpan = document.getElementById('statusLogin');
+            
+            resultDiv.innerHTML = '<pre>Cargando...</pre>';
+            
+            const response = await apiRequest('api/auth/login', {
+                method: 'POST',
+                body: JSON.stringify({
+                    username_or_email: username,
+                    password: password
+                }),
+                noAuth: true
+            });
+            
+            if (response.ok && response.data.success && response.data.data && response.data.data.access_token) {
+                ACCESS_TOKEN = response.data.data.access_token;
+                document.getElementById('accessToken').value = ACCESS_TOKEN;
+                updateAuthStatus();
+                
+                statusSpan.className = 'badge bg-success';
+                statusSpan.textContent = 'OK';
+                resultDiv.innerHTML = `<pre class="text-success">✅ Login exitoso!\nToken: ${ACCESS_TOKEN.substring(0, 50)}...\n\nUsuario: ${JSON.stringify(response.data.data.user, null, 2)}</pre>`;
+            } else {
+                statusSpan.className = 'badge bg-danger';
+                statusSpan.textContent = 'Error';
+                resultDiv.innerHTML = `<pre class="text-danger">❌ Error de autenticación\n${JSON.stringify(response.data || {error: response.error}, null, 2)}</pre>`;
+            }
+        });
+
+        // Test 4: Dashboard
+        document.getElementById('testDashboard').addEventListener('click', async () => {
+            const resultDiv = document.getElementById('dashboardResult');
+            
+            if (!ACCESS_TOKEN) {
+                resultDiv.innerHTML = '<pre class="text-warning">⚠️ Primero debe iniciar sesión</pre>';
+                return;
+            }
+            
+            resultDiv.innerHTML = '<pre>Cargando...</pre>';
+            
+            const response = await apiRequest('api/dashboard/stats');
+            
+            if (response.ok) {
+                resultDiv.innerHTML = `<pre class="text-success">✅ Éxito\n${JSON.stringify(response.data, null, 2)}</pre>`;
+            } else {
+                resultDiv.innerHTML = `<pre class="text-danger">❌ Error (${response.status})\n${JSON.stringify(response.data || {error: response.error}, null, 2)}</pre>`;
+            }
+        });
+
+        // Test 5: Accounts
+        document.getElementById('testAccounts').addEventListener('click', async () => {
+            const resultDiv = document.getElementById('accountsResult');
+            
+            if (!ACCESS_TOKEN) {
+                resultDiv.innerHTML = '<pre class="text-warning">⚠️ Primero debe iniciar sesión</pre>';
+                return;
+            }
+            
+            resultDiv.innerHTML = '<pre>Cargando...</pre>';
+            
+            const response = await apiRequest('api/accounts');
+            
+            if (response.ok) {
+                resultDiv.innerHTML = `<pre class="text-success">✅ Éxito\n${JSON.stringify(response.data, null, 2)}</pre>`;
+            } else {
+                resultDiv.innerHTML = `<pre class="text-danger">❌ Error (${response.status})\n${JSON.stringify(response.data || {error: response.error}, null, 2)}</pre>`;
+            }
+        });
+
+        // Test 6: Incomes
+        document.getElementById('testIncomes').addEventListener('click', async () => {
+            const resultDiv = document.getElementById('incomesResult');
+            
+            if (!ACCESS_TOKEN) {
+                resultDiv.innerHTML = '<pre class="text-warning">⚠️ Primero debe iniciar sesión</pre>';
+                return;
+            }
+            
+            resultDiv.innerHTML = '<pre>Cargando...</pre>';
+            
+            const response = await apiRequest('api/incomes');
+            
+            if (response.ok) {
+                resultDiv.innerHTML = `<pre class="text-success">✅ Éxito\n${JSON.stringify(response.data, null, 2)}</pre>`;
+            } else {
+                resultDiv.innerHTML = `<pre class="text-danger">❌ Error (${response.status})\n${JSON.stringify(response.data || {error: response.error}, null, 2)}</pre>`;
+            }
+        });
+
+        // Inicializar
+        updateAuthStatus();
+        
+        // Verificar si hay token guardado
+        const savedToken = localStorage.getItem('test_token');
+        if (savedToken) {
+            ACCESS_TOKEN = savedToken;
+            document.getElementById('accessToken').value = ACCESS_TOKEN;
+            updateAuthStatus();
+        }
+        
+        // Guardar token cuando se ingrese manualmente
+        document.getElementById('accessToken').addEventListener('input', (e) => {
+            ACCESS_TOKEN = e.target.value;
+            if (ACCESS_TOKEN) {
+                localStorage.setItem('test_token', ACCESS_TOKEN);
+            } else {
+                localStorage.removeItem('test_token');
+            }
+            updateAuthStatus();
+        });
+    </script>
+</body>
+</html>

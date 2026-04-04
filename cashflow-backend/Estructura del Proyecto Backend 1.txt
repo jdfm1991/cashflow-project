@@ -1,0 +1,80 @@
+cashflow-backend/
+│
+├── public/                     # Punto de entrada público
+│   ├── index.php              # Front controller
+│   ├── .htaccess              # Reglas de reescritura (Apache)
+│   └── assets/                # Archivos estáticos (CSS, JS, imágenes)
+│
+├── app/
+│   ├── Config/                # Configuración de la aplicación
+│   │   ├── Database.php       # Configuración y conexión a BD
+│   │   ├── Routes.php         # Definición de rutas
+│   │   └── Constants.php      # Constantes globales
+│   │
+│   ├── Controllers/           # Controladores
+│   │   ├── AuthController.php
+│   │   ├── DashboardController.php
+│   │   ├── AccountController.php
+│   │   ├── TransactionController.php
+│   │   ├── ReportController.php
+│   │   └── UploadController.php
+│   │
+│   ├── Models/                # Modelos (Active Record)
+│   │   ├── User.php
+│   │   ├── Account.php
+│   │   ├── Income.php
+│   │   ├── Expense.php
+│   │   ├── Category.php
+│   │   └── BaseModel.php      # Modelo base con CRUD genérico
+│   │
+│   ├── Services/              # Capa de servicios (lógica de negocio)
+│   │   ├── AuthService.php
+│   │   ├── ReportService.php
+│   │   ├── ExcelService.php
+│   │   ├── PDFService.php
+│   │   └── ValidationService.php
+│   │
+│   ├── Middleware/            # Middlewares
+│   │   ├── AuthMiddleware.php
+│   │   ├── CorsMiddleware.php
+│   │   └── ValidationMiddleware.php
+│   │
+│   ├── Helpers/               # Funciones auxiliares
+│   │   ├── Response.php       # Formato de respuestas JSON
+│   │   ├── Validator.php      # Validaciones
+│   │   └── Logger.php         # Logging
+│   │
+│   └── Exceptions/            # Manejo de excepciones
+│       ├── ApiException.php
+│       └── NotFoundException.php
+│
+├── database/
+│   ├── migrations/            # Migraciones de base de datos
+│   │   ├── 001_create_users_table.sql
+│   │   ├── 002_create_accounts_table.sql
+│   │   ├── 003_create_incomes_table.sql
+│   │   ├── 004_create_expenses_table.sql
+│   │   └── 005_create_categories_table.sql
+│   │
+│   └── seeds/                 # Datos de prueba
+│       ├── users.sql
+│       ├── categories.sql
+│       └── demo_data.sql
+│
+├── storage/
+│   ├── logs/                  # Archivos de log
+│   ├── uploads/               # Archivos temporales
+│   └── exports/               # Reportes generados
+│
+├── vendor/                    # Dependencias (Composer)
+│
+├── tests/                     # Pruebas unitarias
+│   ├── Controllers/
+│   ├── Models/
+│   └── Services/
+│
+├── .env                       # Variables de entorno
+├── .htaccess                  # Configuración global
+├── composer.json              # Dependencias PHP
+├── composer.lock
+└── README.md

@@ -1,0 +1,631 @@
+<?php
+// app/Controllers/TransactionController.php
+declare(strict_types=1);
+
+namespace App\Controllers;
+
+use App\Models\Income;
+use App\Models\Expense;
+use App\Models\Account;
+use App\Helpers\Response;
+use App\Helpers\Validator;
+
+class TransactionController
+{
+    private Income $incomeModel;
+    private Expense $expenseModel;
+    private Account $accountModel;
+
+    public function __construct()
+    {
+        $this->incomeModel = new Income();
+        $this->expenseModel = new Expense();
+        $this->accountModel = new Account();
+    }
+
+    /**
+     * GET /api/incomes
+     * Obtener ingresos del usuario
+     */
+
+    public function getIncomes(): void
+    {
+        $userId = $this->getUserId();
+        $companyId = $this->getCompanyId($userId);
+
+        if ($userId <= 0 || $companyId <= 0) {
+            Response::unauthorized('Usuario no autenticado');
+            return;
+        }
+
+        $filters = [
+            'start_date' => $_GET['start_date'] ?? null,
+            'end_date' => $_GET['end_date'] ?? null,
+            'account_id' => isset($_GET['account_id']) ? (int) $_GET['account_id'] : null
+        ];
+
+        $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : null;
+
+        $incomes = $this->incomeModel->getWithAccount($companyId, $filters, $limit);
+
+        $total = array_sum(array_column($incomes, 'amount'));
+
+        Response::success([
+            'incomes' => $incomes,
+            'total' => $total,
+            'count' => count($incomes)
+        ]);
+    }
+
+    // Método helper para obtener company_id
+    private function getCompanyId(int $userId): int
+    {
+        if ($userId <= 0) {
+            return 0;
+        }
+
+        $userModel = new \App\Models\User();
+        $user = $userModel->find($userId);
+        return $user['company_id'] ?? 0;
+    }
+
+    /**
+     * POST /api/incomes
+     * Crear nuevo ingreso
+     */
+    public function createIncome(): void
+    {
+        $userId = $this->getUserId();
+        $companyId = $this->getCompanyId($userId);
+
+        if ($userId <= 0 || $companyId <= 0) {
+            Response::unauthorized('Usuario no autenticado');
+            return;
+        }
+
+        $rawInput = file_get_contents('php://input');
+        $data = json_decode($rawInput, true);
+
+        if (empty($data) || $data === null) {
+            Response::error('No se recibieron datos', 400);
+            return;
+        }
+
+        $validator = new Validator($data);
+        $validator->required('account_id');
+        $validator->numeric('account_id');
+        $validator->required('amount');
+        $validator->numeric('amount');
+        $validator->min('amount', 0.01);
+        $validator->required('date');
+        $validator->date('date', 'Y-m-d');
+        $validator->required('currency_id');
+        $validator->numeric('currency_id');
+        $validator->required('payment_method');
+        $validator->in('payment_method', ['cash', 'bank']);
+
+        if (!$validator->passes()) {
+            Response::validationError($validator->errors());
+            return;
+        }
+
+        // Validar fecha futura
+        if (!$this->validateDateNotFuture($data['date'])) {
+            Response::validationError(['date' => 'No se puede registrar una transacción con fecha futura']);
+            return;
+        }
+
+        // Verificar cuenta
+        $account = $this->accountModel->find((int) $data['account_id']);
+        if (!$account || $account['type'] !== 'income') {
+            Response::validationError(['account_id' => 'Cuenta no válida para ingreso']);
+            return;
+        }
+
+        // Verificar moneda
+        $currencyModel = new \App\Models\Currency();
+        $currency = $currencyModel->find((int) $data['currency_id']);
+        if (!$currency) {
+            Response::validationError(['currency_id' => 'Moneda no válida']);
+            return;
+        }
+
+        // Obtener tasa de cambio
+        $exchangeRate = 1;
+        $amountBaseCurrency = $data['amount'];
+
+        $currencyService = new \App\Services\CurrencyService();
+        $baseCurrency = $currencyService->getBaseCurrency();
+
+        if ($baseCurrency && $data['currency_id'] != $baseCurrency['id']) {
+            $conversion = $currencyService->convert($data['amount'], $data['currency_id'], $baseCurrency['id'], $data['date']);
+            if ($conversion['success']) {
+                $exchangeRate = $conversion['rate'];
+                $amountBaseCurrency = $conversion['converted_amount'];
+            }
+        }
+
+        $incomeData = [
+            'company_id' => $companyId,
+            'user_id' => $userId,
+            'account_id' => (int) $data['account_id'],
+            'amount' => (float) $data['amount'],
+            'currency_id' => (int) $data['currency_id'],
+            'exchange_rate' => $exchangeRate,
+            'amount_base_currency' => $amountBaseCurrency,
+            'date' => $data['date'],
+            'description' => $data['description'] ?? null,
+            'reference' => $data['reference'] ?? null,
+            'payment_method' => $data['payment_method']
+        ];
+
+        $income = $this->incomeModel->create($incomeData);
+
+        if ($income) {
+            Response::success($income, 'Ingreso registrado exitosamente', 201);
+        } else {
+            Response::error('Error al registrar el ingreso', 500);
+        }
+    }
+
+    /**
+     * GET /api/incomes/{id}
+     * Obtener ingreso específico
+     */
+    public function getIncome(int $id): void
+    {
+        $userId = $this->getUserId();
+
+        $income = $this->incomeModel->find($id);
+
+        if (!$income) {
+            Response::notFound('Ingreso no encontrado');
+            return;
+        }
+
+        if ($income['user_id'] != $userId) {
+            Response::forbidden('No autorizado');
+            return;
+        }
+
+        // Obtener datos de la cuenta
+        $account = $this->accountModel->find($income['account_id']);
+        $income['account_name'] = $account['name'] ?? null;
+        $income['category'] = $account['category'] ?? null;
+
+        Response::success($income);
+    }
+
+    /**
+     * PUT /api/incomes/{id}
+     * Actualizar ingreso
+     */
+    public function updateIncome(int $id): void
+    {
+        $rawInput = file_get_contents('php://input');
+        $data = json_decode($rawInput, true);
+        $userId = $this->getUserId();
+        $companyId = $this->getCompanyId($userId);
+
+        if ($userId <= 0 || $companyId <= 0) {
+            Response::unauthorized('Usuario no autenticado');
+            return;
+        }
+
+        $income = $this->incomeModel->find($id);
+
+        if (!$income) {
+            Response::notFound('Ingreso no encontrado');
+            return;
+        }
+
+        if ($income['company_id'] != $companyId) {
+            Response::forbidden('No autorizado');
+            return;
+        }
+
+        $validator = new Validator($data ?? []);
+        $validator->optional('account_id');
+        $validator->numeric('account_id');
+
+        $validator->optional('amount');
+        $validator->numeric('amount');
+        $validator->min('amount', 0.01);
+
+        // ✅ Solo validar fecha si existe en la petición
+        if (isset($data['date'])) {
+            $validator->required('date');
+            $validator->date('date', 'Y-m-d');
+
+            // ✅ Validar que no sea fecha futura
+            if (!$this->validateDateNotFuture($data['date'])) {
+                Response::validationError(['date' => 'No se puede establecer una fecha futura']);
+                return;
+            }
+        }
+
+        $validator->optional('description');
+        $validator->string('description');
+        $validator->maxLength('description', 500);
+
+        $validator->optional('reference');
+        $validator->string('reference');
+        $validator->maxLength('reference', 100);
+
+        if (!$validator->passes()) {
+            Response::validationError($validator->errors());
+            return;
+        }
+
+        // Si se cambia la cuenta, verificar que existe y es del tipo correcto
+        if (isset($data['account_id'])) {
+            $account = $this->accountModel->find((int) $data['account_id']);
+
+            if (!$account) {
+                Response::notFound('Cuenta no encontrada');
+                return;
+            }
+
+            if ($account['type'] !== 'income') {
+                Response::validationError(['account_id' => 'La cuenta seleccionada no es de tipo ingreso']);
+                return;
+            }
+        }
+
+        $updated = $this->incomeModel->update($id, $data);
+
+        if ($updated) {
+            Response::success($updated, 'Ingreso actualizado exitosamente');
+        } else {
+            Response::error('Error al actualizar el ingreso', 500);
+        }
+    }
+
+    /**
+     * DELETE /api/incomes/{id}
+     * Eliminar ingreso
+     */
+    public function deleteIncome(int $id): void
+    {
+        $userId = $this->getUserId();
+
+        $income = $this->incomeModel->find($id);
+
+        if (!$income) {
+            Response::notFound('Ingreso no encontrado');
+            return;
+        }
+
+        if ($income['user_id'] != $userId) {
+            Response::forbidden('No autorizado');
+            return;
+        }
+
+        if ($this->incomeModel->delete($id)) {
+            Response::success(null, 'Ingreso eliminado exitosamente');
+        } else {
+            Response::error('Error al eliminar el ingreso', 500);
+        }
+    }
+
+    /**
+     * GET /api/expenses
+     * Obtener egresos del usuario
+     */
+    public function getExpenses(): void
+    {
+        $userId = $this->getUserId();
+        $companyId = $this->getCompanyId($userId);
+
+        if ($userId <= 0 || $companyId <= 0) {
+            Response::unauthorized('Usuario no autenticado');
+            return;
+        }
+
+        $filters = [
+            'start_date' => $_GET['start_date'] ?? null,
+            'end_date' => $_GET['end_date'] ?? null,
+            'account_id' => isset($_GET['account_id']) ? (int) $_GET['account_id'] : null
+        ];
+
+        $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : null;
+
+        $expenses = $this->expenseModel->getWithAccount($companyId, $filters, $limit);
+
+        // Calcular total
+        $total = array_sum(array_column($expenses, 'amount'));
+
+        // Agregar log para depurar
+        error_log("getExpenses - CompanyId: $companyId, Total encontrados: " . count($expenses));
+
+        Response::success([
+            'expenses' => $expenses,
+            'total' => $total,
+            'count' => count($expenses)
+        ]);
+    }
+    /**
+     * POST /api/expenses
+     * Crear nuevo egreso
+     */
+    public function createExpense(): void
+    {
+        $userId = $this->getUserId();
+        $companyId = $this->getCompanyId($userId);
+
+        if ($userId <= 0 || $companyId <= 0) {
+            Response::unauthorized('Usuario no autenticado');
+            return;
+        }
+
+        $rawInput = file_get_contents('php://input');
+        $data = json_decode($rawInput, true);
+
+        if (empty($data) || $data === null) {
+            Response::error('No se recibieron datos', 400);
+            return;
+        }
+
+        // Validaciones
+        $validator = new Validator($data);
+        $validator->required('account_id');
+        $validator->numeric('account_id');
+        $validator->required('amount');
+        $validator->numeric('amount');
+        $validator->min('amount', 0.01);
+        $validator->required('date');
+        $validator->date('date', 'Y-m-d');
+
+        if (!$validator->passes()) {
+            Response::validationError($validator->errors());
+            return;
+        }
+
+        // Verificar que la cuenta existe (catálogo global)
+        $accountModel = new \App\Models\Account();
+        $account = $accountModel->find((int) $data['account_id']);
+
+        if (!$account) {
+            Response::notFound('Cuenta no encontrada');
+            return;
+        }
+
+        // Verificar que la cuenta es del tipo correcto (expense)
+        if ($account['type'] !== 'expense') {
+            Response::validationError(['account_id' => 'La cuenta seleccionada no es de tipo egreso']);
+            return;
+        }
+
+        // Crear egreso
+        $expenseData = [
+            'company_id' => $companyId,
+            'user_id' => $userId,
+            'account_id' => (int) $data['account_id'],
+            'amount' => (float) $data['amount'],
+            'date' => $data['date'],
+            'description' => $data['description'] ?? null,
+            'reference' => $data['reference'] ?? null
+        ];
+
+        $expense = $this->expenseModel->create($expenseData);
+
+        if ($expense) {
+            Response::success($expense, 'Egreso registrado exitosamente', 201);
+        } else {
+            Response::error('Error al registrar el egreso', 500);
+        }
+    }
+
+    /**
+     * GET /api/expenses/{id}
+     * Obtener egreso específico
+     */
+    public function getExpense(int $id): void
+    {
+        $userId = $this->getUserId();
+
+        $expense = $this->expenseModel->find($id);
+
+        if (!$expense) {
+            Response::notFound('Egreso no encontrado');
+            return;
+        }
+
+        if ($expense['user_id'] != $userId) {
+            Response::forbidden('No autorizado');
+            return;
+        }
+
+        $account = $this->accountModel->find($expense['account_id']);
+        $expense['account_name'] = $account['name'] ?? null;
+        $expense['category'] = $account['category'] ?? null;
+
+        Response::success($expense);
+    }
+
+    /**
+     * PUT /api/expenses/{id}
+     * Actualizar egreso
+     */
+    public function updateExpense(int $id): void
+    {
+        $rawInput = file_get_contents('php://input');
+        $data = json_decode($rawInput, true);
+        $userId = $this->getUserId();
+        $companyId = $this->getCompanyId($userId);
+
+        if ($userId <= 0 || $companyId <= 0) {
+            Response::unauthorized('Usuario no autenticado');
+            return;
+        }
+
+        $expense = $this->expenseModel->find($id);
+
+        if (!$expense) {
+            Response::notFound('Egreso no encontrado');
+            return;
+        }
+
+        if ($expense['company_id'] != $companyId) {
+            Response::forbidden('No autorizado');
+            return;
+        }
+
+        $validator = new Validator($data ?? []);
+        $validator->optional('account_id');
+        $validator->numeric('account_id');
+
+        $validator->optional('amount');
+        $validator->numeric('amount');
+        $validator->min('amount', 0.01);
+
+        // ✅ Solo validar fecha si existe en la petición
+        if (isset($data['date'])) {
+            $validator->required('date');
+            $validator->date('date', 'Y-m-d');
+
+            if (!$this->validateDateNotFuture($data['date'])) {
+                Response::validationError(['date' => 'No se puede establecer una fecha futura']);
+                return;
+            }
+        }
+
+        $validator->optional('description');
+        $validator->string('description');
+        $validator->maxLength('description', 500);
+
+        $validator->optional('reference');
+        $validator->string('reference');
+        $validator->maxLength('reference', 100);
+
+        if (!$validator->passes()) {
+            Response::validationError($validator->errors());
+            return;
+        }
+
+        if (isset($data['account_id'])) {
+            $account = $this->accountModel->find((int) $data['account_id']);
+
+            if (!$account) {
+                Response::notFound('Cuenta no encontrada');
+                return;
+            }
+
+            if ($account['type'] !== 'expense') {
+                Response::validationError(['account_id' => 'La cuenta seleccionada no es de tipo egreso']);
+                return;
+            }
+        }
+
+        $updated = $this->expenseModel->update($id, $data);
+
+        if ($updated) {
+            Response::success($updated, 'Egreso actualizado exitosamente');
+        } else {
+            Response::error('Error al actualizar el egreso', 500);
+        }
+    }
+
+    /**
+     * DELETE /api/expenses/{id}
+     * Eliminar egreso
+     */
+    public function deleteExpense(int $id): void
+    {
+        $userId = $this->getUserId();
+
+        $expense = $this->expenseModel->find($id);
+
+        if (!$expense) {
+            Response::notFound('Egreso no encontrado');
+            return;
+        }
+
+        if ($expense['user_id'] != $userId) {
+            Response::forbidden('No autorizado');
+            return;
+        }
+
+        if ($this->expenseModel->delete($id)) {
+            Response::success(null, 'Egreso eliminado exitosamente');
+        } else {
+            Response::error('Error al eliminar el egreso', 500);
+        }
+    }
+
+    /**
+     * Obtener ID de usuario autenticado
+     */
+    private function getUserId(): int
+    {
+        // Buscar en $_REQUEST (establecido por AuthMiddleware)
+        if (isset($_REQUEST['user_id']) && !empty($_REQUEST['user_id'])) {
+            return (int) $_REQUEST['user_id'];
+        }
+
+        // Buscar en $_POST
+        if (isset($_POST['user_id']) && !empty($_POST['user_id'])) {
+            return (int) $_POST['user_id'];
+        }
+
+        // Buscar en $_GET
+        if (isset($_GET['user_id']) && !empty($_GET['user_id'])) {
+            return (int) $_GET['user_id'];
+        }
+
+        // Buscar en $_SERVER
+        if (isset($_SERVER['USER_ID']) && !empty($_SERVER['USER_ID'])) {
+            return (int) $_SERVER['USER_ID'];
+        }
+
+        // Intentar extraer del token
+        $headers = getallheaders();
+        $authHeader = $headers['Authorization'] ?? '';
+
+        if (preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
+            try {
+                $jwtService = new \App\Services\JWTService();
+                $payload = $jwtService->validate($matches[1]);
+                if ($payload && isset($payload['user_id'])) {
+                    return (int) $payload['user_id'];
+                }
+            } catch (\Exception $e) {
+                // Error al validar token
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * Validar que la fecha no sea futura
+     */
+    private function validateDateNotFuture(string $date): bool
+    {
+        $today = date('Y-m-d');
+        return $date <= $today;
+    }
+
+    /**
+     * Validar rango de fechas
+     */
+    private function validateDateRange(?string $startDate, ?string $endDate): array
+    {
+        $errors = [];
+        $today = date('Y-m-d');
+
+        if ($startDate && $startDate > $today) {
+            $errors[] = 'La fecha desde no puede ser mayor al día actual';
+        }
+
+        if ($endDate && $endDate > $today) {
+            $errors[] = 'La fecha hasta no puede ser mayor al día actual';
+        }
+
+        if ($startDate && $endDate && $startDate > $endDate) {
+            $errors[] = 'La fecha desde no puede ser mayor a la fecha hasta';
+        }
+
+        return $errors;
+    }
+}

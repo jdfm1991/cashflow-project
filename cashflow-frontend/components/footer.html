@@ -1,0 +1,65 @@
+<!-- components/footer.html -->
+<footer class="footer mt-auto py-3 bg-light border-top">
+    <div class="container-fluid px-4">
+        <div class="row align-items-center">
+            <div class="col-md-4 text-center text-md-start mb-2 mb-md-0">
+                <span class="text-muted">
+                    <i class="bi bi-c-circle"></i> 2024-2026 FlowControl
+                </span>
+            </div>
+            <div class="col-md-4 text-center mb-2 mb-md-0">
+                <span class="text-muted">
+                    <i class="bi bi-code-slash"></i> Desarrollado por 
+                    <a href="#" class="text-decoration-none" id="developerLink" style="cursor: pointer;">CashFlow Team</a>
+                </span>
+            </div>
+            <div class="col-md-4 text-center text-md-end">
+                <span class="text-muted">
+                    <i class="bi bi-tag"></i> Versión 
+                    <strong id="appVersion">1.0.0</strong>
+                    <span class="mx-1">|</span>
+                    <i class="bi bi-database"></i> API v1
+                </span>
+            </div>
+        </div>
+    </div>
+</footer>
+
+<style>
+    .footer {
+        position: relative;
+        bottom: 0;
+        width: 100%;
+        font-size: 0.85rem;
+        margin-top: 2rem;
+    }
+    
+    .footer a {
+        color: #6c757d;
+        transition: color 0.2s ease;
+        text-decoration: none;
+    }
+    
+    .footer a:hover {
+        color: #0d6efd;
+        text-decoration: underline;
+    }
+    
+    /* Asegurar que el footer siempre esté al fondo */
+    .main-content {
+        min-height: calc(100vh - 60px);
+        display: flex;
+        flex-direction: column;
+    }
+    
+    #app-content {
+        flex: 1;
+    }
+    
+    @media (max-width: 768px) {
+        .footer {
+            font-size: 0.75rem;
+            padding: 1rem 0;
+        }
+    }
+</style>

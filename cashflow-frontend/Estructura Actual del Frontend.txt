@@ -1,0 +1,27 @@
+cashflow-frontend/
+│
+├── index.html
+├── components/
+│   ├── sidebar.html
+│   └── navbar.html
+├── assets/
+│   ├── css/
+│   │   └── style.css
+│   └── js/
+│       └── main.js
+├── modules/
+│   ├── dashboard.js
+│   ├── accounts.js
+│   ├── income.js
+│   ├── expense.js
+│   ├── statements.js
+│   └── reports.js
+├── services/
+│   ├── apiService.js
+│   ├── authService.js
+│   ├── accountService.js
+│   ├── transactionService.js
+│   ├── dashboardService.js
+│   └── reportService.js
+└── utils/
+    └── helpers.js

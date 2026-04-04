@@ -1,0 +1,26 @@
+Cliente hace petición
+         ↓
+    index.php recibe
+         ↓
+   Extrae URL y método
+         ↓
+   Carga archivo Routes.php
+         ↓
+   Itera sobre cada ruta
+         ↓
+   ¿Método HTTP coincide?
+         ├─ NO → Continúa con siguiente ruta
+         └─ SÍ → ¿preg_match() con patrón?
+                   ├─ NO → Continúa con siguiente ruta
+                   └─ SÍ → Encontró ruta
+                             ↓
+                     Crea instancia del controlador
+                             ↓
+                     Ejecuta middlewares
+                             ↓
+                     ¿Middleware autoriza?
+                             ├─ NO → Retorna error 401
+                             └─ SÍ → Ejecuta método del controlador
+                                      con parámetros extraídos
+                                         ↓
+                                   Retorna respuesta JSON

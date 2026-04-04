@@ -1,0 +1,21 @@
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    
+    # Si el archivo o directorio existe, sírvelo directamente
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    
+    # Si no, redirige todo a index.php
+    RewriteRule ^(.*)$ index.php [QSA,L]
+</IfModule>
+
+# Configuración de seguridad
+<FilesMatch "\.(env|json|lock|sql)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Configuración de caché para assets
+<FilesMatch "\.(css|js|png|jpg|jpeg|gif|ico)$">
+    Header set Cache-Control "max-age=2592000, public"
+</FilesMatch>
