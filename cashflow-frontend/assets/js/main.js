@@ -48,7 +48,7 @@ const protectedRoutes = [
 ];
 
 // Módulos que solo super_admin puede ver
-const superAdminRoutes = ['companies', 'users', 'banks', 'accounts'];
+const superAdminRoutes = ['companies', 'users', 'banks', 'accounts', 'bank-accounts'];
 
 // Elementos del DOM
 let loginModal, registerModal;
