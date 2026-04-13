@@ -381,7 +381,8 @@ abstract class Transaction extends BaseModel
     {
         $sql = "SELECT COUNT(*) as total FROM {$this->table} WHERE currency_id = :currency_id";
         $stmt = $this->db->prepare($sql);
-        $stmt->execute(['currency_id' => $currencyId]);
+        $stmt->bindValue(':currency_id', $currencyId, PDO::PARAM_INT);
+        $stmt->execute();
         $result = $stmt->fetch();
         return (int) ($result['total'] ?? 0);
     }
@@ -521,5 +522,167 @@ abstract class Transaction extends BaseModel
         $stmt->execute(['company_id' => $companyId]);
         $result = $stmt->fetch();
         return $result['last_date'] ?? null;
+    }
+
+    // app/Models/Transaction.php - Agregar estos métodos
+
+    /**
+     * Obtener todas las transacciones (global - sin filtro de empresa)
+     * Para super_admin y admin
+     */
+    public function getAllGlobal(): array
+    {
+        $type = $this->table === 'incomes' ? 'income' : 'expense';
+        $typeLabel = $this->table === 'incomes' ? 'Ingreso' : 'Egreso';
+
+        $sql = "SELECT t.*, a.name as account_name, a.category, c.name as company_name, '{$type}' as type, '{$typeLabel}' as type_label
+            FROM {$this->table} t
+            INNER JOIN accounts a ON t.account_id = a.id
+            INNER JOIN companies c ON t.company_id = c.id
+            ORDER BY t.date DESC, t.created_at DESC";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute();
+
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Obtener transacciones por empresa
+     * Para usuarios normales
+     */
+    public function getByCompany(int $companyId): array
+    {
+        $type = $this->table === 'incomes' ? 'income' : 'expense';
+        $typeLabel = $this->table === 'incomes' ? 'Ingreso' : 'Egreso';
+
+        $sql = "SELECT t.*, a.name as account_name, a.category, '{$type}' as type, '{$typeLabel}' as type_label
+            FROM {$this->table} t
+            INNER JOIN accounts a ON t.account_id = a.id
+            WHERE t.company_id = :company_id
+            ORDER BY t.date DESC, t.created_at DESC";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute(['company_id' => $companyId]);
+
+        return $stmt->fetchAll();
+    }
+
+    // En app/Models/Transaction.php (ya deberían existir estos métodos)
+
+    /**
+     * Obtener transacciones globales con filtros (para super_admin)
+     */
+    public function getGlobalWithFilters(array $filters = [], ?int $limit = null): array
+    {
+        $type = $this->table === 'incomes' ? 'income' : 'expense';
+        $typeLabel = $this->table === 'incomes' ? 'Ingreso' : 'Egreso';
+
+        $sql = "SELECT t.*, a.name as account_name, a.category, c.name as company_name, 
+                   '{$type}' as type, '{$typeLabel}' as type_label
+            FROM {$this->table} t
+            INNER JOIN accounts a ON t.account_id = a.id
+            INNER JOIN companies c ON t.company_id = c.id
+            WHERE 1=1";
+        $params = [];
+
+        if (!empty($filters['start_date'])) {
+            $sql .= " AND t.date >= :start_date";
+            $params['start_date'] = $filters['start_date'];
+        }
+
+        if (!empty($filters['end_date'])) {
+            $sql .= " AND t.date <= :end_date";
+            $params['end_date'] = $filters['end_date'];
+        }
+
+        if (!empty($filters['account_id'])) {
+            $sql .= " AND t.account_id = :account_id";
+            $params['account_id'] = $filters['account_id'];
+        }
+
+        $sql .= " ORDER BY t.date DESC, t.created_at DESC";
+
+        if ($limit) {
+            $sql .= " LIMIT :limit";
+            $params['limit'] = $limit;
+        }
+
+        $stmt = $this->db->prepare($sql);
+
+        foreach ($params as $key => $value) {
+            $paramType = $key === 'limit' ? PDO::PARAM_INT : PDO::PARAM_STR;
+            $stmt->bindValue($key, $value, $paramType);
+        }
+
+        $stmt->execute();
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Obtener transacciones por empresa con filtros
+     */
+    public function getByCompanyWithFilters(int $companyId, array $filters = [], ?int $limit = null): array
+    {
+        $type = $this->table === 'incomes' ? 'income' : 'expense';
+        $typeLabel = $this->table === 'incomes' ? 'Ingreso' : 'Egreso';
+
+        $sql = "SELECT t.*, a.name as account_name, a.category, 
+                   '{$type}' as type, '{$typeLabel}' as type_label
+            FROM {$this->table} t
+            INNER JOIN accounts a ON t.account_id = a.id
+            WHERE t.company_id = :company_id";
+        $params = ['company_id' => $companyId];
+
+        if (!empty($filters['start_date'])) {
+            $sql .= " AND t.date >= :start_date";
+            $params['start_date'] = $filters['start_date'];
+        }
+
+        if (!empty($filters['end_date'])) {
+            $sql .= " AND t.date <= :end_date";
+            $params['end_date'] = $filters['end_date'];
+        }
+
+        if (!empty($filters['account_id'])) {
+            $sql .= " AND t.account_id = :account_id";
+            $params['account_id'] = $filters['account_id'];
+        }
+
+        $sql .= " ORDER BY t.date DESC, t.created_at DESC";
+
+        if ($limit) {
+            $sql .= " LIMIT :limit";
+            $params['limit'] = $limit;
+        }
+
+        $stmt = $this->db->prepare($sql);
+
+        foreach ($params as $key => $value) {
+            $paramType = $key === 'limit' ? PDO::PARAM_INT : PDO::PARAM_STR;
+            $stmt->bindValue($key, $value, $paramType);
+        }
+
+        $stmt->execute();
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Obtener total global por período (sin filtrar por empresa)
+     */
+    public function getTotalByPeriodGlobal(string $startDate, string $endDate): float
+    {
+        $sql = "SELECT COALESCE(SUM(amount_base_currency), 0) as total 
+            FROM {$this->table} 
+            WHERE date BETWEEN :start_date AND :end_date";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([
+            'start_date' => $startDate,
+            'end_date' => $endDate
+        ]);
+
+        $result = $stmt->fetch();
+        return (float) ($result['total'] ?? 0);
     }
 }

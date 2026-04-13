@@ -106,6 +106,29 @@ class ExchangeRateController
             return;
         }
 
+        // ✅ Verificar si ya existe una tasa para esta combinación y fecha
+        $existing = $this->exchangeRateModel->findByCurrenciesAndDate(
+            $data['from_currency_id'],
+            $data['to_currency_id'],
+            $data['effective_date']
+        );
+
+        if ($existing) {
+            // Obtener nombres de monedas para el mensaje
+            $fromName = $fromCurrency['code'] . ' - ' . $fromCurrency['name'];
+            $toName = $toCurrency['code'] . ' - ' . $toCurrency['name'];
+
+            Response::conflict(
+                "Ya existe una tasa de cambio para {$fromName} → {$toName} en la fecha {$data['effective_date']}. " .
+                    "Puede editar la tasa existente o seleccionar otra fecha.",
+                [
+                    'existing_rate' => $existing['rate'],
+                    'existing_id' => $existing['id']
+                ]
+            );
+            return;
+        }
+
         $rateData = [
             'from_currency_id' => $data['from_currency_id'],
             'to_currency_id' => $data['to_currency_id'],
@@ -235,5 +258,20 @@ class ExchangeRateController
         }
 
         return 0;
+    }
+
+    /**
+     * GET /api/exchange-rates/all
+     * Obtener todas las tasas de cambio (histórico completo)
+     */
+    public function getAll(): void
+    {
+        $rates = $this->exchangeRateModel->getAllRates();
+
+        foreach ($rates as &$rate) {
+            $rate['rate'] = (float) $rate['rate'];
+        }
+
+        Response::success($rates);
     }
 }

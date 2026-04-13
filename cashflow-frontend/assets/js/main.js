@@ -85,45 +85,37 @@ function checkAuth() {
 
 // Función para actualizar la interfaz según autenticación
 function updateUIForAuth() {
-    // Obtener información de autenticación
     const isAuthenticated = api.isAuthenticated();
     const user = api.getUser();
     const userRole = user?.role || 'user';
 
-    // Si no hay usuario en localStorage pero estamos autenticados, intentar obtenerlo
-    if (isAuthenticated && !user) {
-        // Intentar obtener usuario del token o hacer una petición
-        const token = localStorage.getItem('access_token');
-        if (token) {
-            try {
-                // Decodificar token para obtener información básica
-                const payload = JSON.parse(atob(token.split('.')[1]));
-                if (payload && payload.user_id) {
-                    user = {
-                        id: payload.user_id,
-                        role: payload.role || 'user',
-                        username: payload.username,
-                        email: payload.email
-                    };
-                    localStorage.setItem('user_data', JSON.stringify(user));
-                }
-            } catch (e) {
-                console.error('Error decoding token:', e);
-            }
-        }
-    }
-
     console.log('updateUIForAuth - isAuthenticated:', isAuthenticated, 'userRole:', userRole);
 
-    // El sidebar y navbar deben actualizarse, pero el contenido del dashboard no debe ocultarse
+    // Mostrar/ocultar menús público/privado
     if (publicMenu) publicMenu.style.display = isAuthenticated ? 'none' : 'block';
     if (privateMenu) privateMenu.style.display = isAuthenticated ? 'block' : 'none';
     if (publicNavbar) publicNavbar.style.display = isAuthenticated ? 'none' : 'block';
     if (privateNavbar) privateNavbar.style.display = isAuthenticated ? 'block' : 'none';
 
-    // Actualizar visibilidad de elementos según rol
-    if (typeof window.updateMenuByRole === 'function') {
-        window.updateMenuByRole(userRole);
+    // Elementos que solo ve super_admin
+    const superAdminOnlyItems = document.querySelectorAll('.super-admin-only');
+    superAdminOnlyItems.forEach(item => {
+        item.style.display = (userRole === 'super_admin') ? 'block' : 'none';
+    });
+
+    // Configurar selector de empresas según rol
+    const companySelect = document.getElementById('companySelect');
+    if (companySelect) {
+        if (userRole === 'super_admin' || userRole === 'admin') {
+            companySelect.disabled = false;
+            loadAllCompanies();
+        } else if (userRole === 'user') {
+            const userCompanyId = user?.company_id;
+            if (userCompanyId) {
+                companySelect.innerHTML = `<option value="${userCompanyId}" selected>Mi Empresa</option>`;
+                companySelect.disabled = true;
+            }
+        }
     }
 
     if (user) {
@@ -132,21 +124,98 @@ function updateUIForAuth() {
         if (userNameSpan) userNameSpan.textContent = user.full_name || user.username || 'Usuario';
         if (userEmailSpan) userEmailSpan.textContent = user.email || '';
     }
+}
 
-    // Actualizar visibilidad de elementos según rol
-    /* const superAdminItems = document.querySelectorAll('.super-admin-only');
-    if (userRole === 'super_admin') {
-        superAdminItems.forEach(item => item.style.display = 'block');
-    } else {
-        superAdminItems.forEach(item => item.style.display = 'none');
+function loadAllCompanies() {
+
+    // Verificar que hay token antes de hacer la petición
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        console.warn('No hay token, no se pueden cargar las empresas');
+        return;
     }
 
-    if (user) {
-        const userNameSpan = document.getElementById('userName');
-        const userEmailSpan = document.getElementById('userEmail');
-        if (userNameSpan) userNameSpan.textContent = user.full_name || user.username || 'Usuario';
-        if (userEmailSpan) userEmailSpan.textContent = user.email || '';
-    } */
+    
+    // ✅ Cambiar false por true (requiere autenticación)
+    api.get('api/companies', true).then(response => {
+        if (response.success && response.data) {
+            const select = document.getElementById('companySelect');
+            if (select) {
+                select.innerHTML = '<option value="">Seleccione una empresa...</option>' +
+                    response.data.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+            }
+        }
+    }).catch(error => {
+        console.error('Error loading companies:', error);
+        // Si hay error, mostrar mensaje amigable
+        const select = document.getElementById('companySelect');
+        if (select) {
+            select.innerHTML = '<option value="">Error al cargar empresas</option>';
+        }
+    });
+}
+
+//Agregar este método después de updateUIForAuth
+function setReadOnlyMode() {
+    // Ocultar botones de creación/edición/eliminación en módulos de solo lectura
+    const actionButtons = document.querySelectorAll('.btn-primary, .btn-danger, .btn-warning, .edit-btn, .delete-btn, .add-btn');
+
+    actionButtons.forEach(btn => {
+        // Verificar si el botón es para acciones que deben deshabilitarse
+        const isActionButton = btn.classList.contains('edit-account') ||
+            btn.classList.contains('delete-account') ||
+            btn.classList.contains('add-account') ||
+            btn.classList.contains('save-btn') ||
+            btn.innerText.includes('Nuevo') ||
+            btn.innerText.includes('Editar') ||
+            btn.innerText.includes('Eliminar') ||
+            btn.innerText.includes('Guardar');
+
+        if (isActionButton) {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.style.cursor = 'not-allowed';
+        }
+    });
+
+    // Agregar indicador visual de modo solo lectura
+    const existingIndicator = document.getElementById('readOnlyIndicator');
+    if (!existingIndicator) {
+        const indicator = document.createElement('div');
+        indicator.id = 'readOnlyIndicator';
+        indicator.className = 'alert alert-warning text-center mb-3';
+        indicator.innerHTML = '<i class="bi bi-info-circle"></i> Modo de solo lectura. No puedes realizar cambios.';
+        const mainContent = document.querySelector('.main-content');
+        if (mainContent) {
+            mainContent.insertBefore(indicator, mainContent.firstChild);
+        }
+    }
+}
+
+function clearReadOnlyMode() {
+    // Restaurar botones
+    const buttons = document.querySelectorAll('.btn-primary, .btn-danger, .btn-warning');
+    buttons.forEach(btn => {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+    });
+
+    // Eliminar indicador
+    const indicator = document.getElementById('readOnlyIndicator');
+    if (indicator) {
+        indicator.remove();
+    }
+}
+
+function loadUserCompany() {
+    // Cargar solo la empresa del usuario
+    const user = api.getUser();
+    if (user && user.company_id) {
+        const select = document.getElementById('companySelect');
+        select.innerHTML = `<option value="${user.company_id}" selected>Mi Empresa</option>`;
+        select.disabled = true;
+    }
 }
 
 // Función para cerrar sesión

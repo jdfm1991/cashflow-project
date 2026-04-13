@@ -23,10 +23,18 @@ class AccountController
      */
     public function index(): void
     {
+        $userId = $this->getUserId();
+        $userRole = $this->getUserRole($userId);
         $type = $_GET['type'] ?? null;
 
-        // Las cuentas son globales, no requieren filtro por empresa
-        $accounts = $this->accountModel->getGlobalAccounts($type);
+        if ($userRole === 'super_admin' || $userRole === 'admin') {
+            // super_admin y admin ven TODAS las cuentas (globales)
+            $accounts = $this->accountModel->getGlobalAccounts($type);
+        } else {
+            // user normal solo ve cuentas de su empresa
+            $companyId = $this->getCompanyId($userId);
+            $accounts = $this->accountModel->getByCompany($companyId, $type);
+        }
 
         Response::success($accounts);
     }
@@ -231,11 +239,15 @@ class AccountController
      */
     private function getUserRole(int $userId): string
     {
+        if ($userId <= 0) {
+            return 'guest';
+        }
+
         $userModel = new \App\Models\User();
         $user = $userModel->find($userId);
         return $user['role'] ?? 'user';
     }
-
+    
     /**
      * Obtener ID de usuario autenticado
      */
@@ -261,5 +273,21 @@ class AccountController
         }
 
         return 0;
+    }
+
+    // app/Controllers/AccountController.php - Agregar estos métodos
+
+    /**
+     * Obtener ID de empresa del usuario autenticado
+     */
+    private function getCompanyId(int $userId): int
+    {
+        if ($userId <= 0) {
+            return 0;
+        }
+
+        $userModel = new \App\Models\User();
+        $user = $userModel->find($userId);
+        return $user['company_id'] ?? 0;
     }
 }

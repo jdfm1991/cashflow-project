@@ -77,7 +77,7 @@ export const exchangeRatesModule = {
         const date = document.getElementById('rateDate')?.value || '';
 
         try {
-            let url = 'api/exchange-rates';
+            let url = 'api/exchange-rates/all';
             if (date) {
                 url += `?date=${date}`;
             }
@@ -353,7 +353,13 @@ export const exchangeRatesModule = {
                 modal.hide();
                 await this.loadRates();
             } catch (error) {
-                showAlert(error.message || 'Error al guardar la tasa', 'danger');
+                console.error('Error saving rate:', error);
+                // ✅ Manejar error de duplicado específicamente
+                if (error.message && error.message.includes('Ya existe una tasa')) {
+                    showAlert(error.message, 'warning');
+                } else {
+                    showAlert(error.message || 'Error al guardar la tasa', 'danger');
+                }
             } finally {
                 saveBtn.disabled = false;
                 saveBtn.innerHTML = isEditing ? 'Actualizar' : 'Crear';

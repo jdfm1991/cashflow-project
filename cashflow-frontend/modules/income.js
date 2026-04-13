@@ -1,57 +1,107 @@
-import { api } from '../services/apiService.js';
+// modules/income.js
 import { transactionService } from '../services/transactionService.js';
 import { accountService } from '../services/accountService.js';
-import { currencyService } from '../services/currencyService.js';
+import { companyService } from '../services/companyService.js';
 import { formatCurrency, formatDate, showAlert } from '../utils/helpers.js';
+import { api } from '../services/apiService.js';
+import { pdfExportService } from '../services/pdfExportService.js';
 
 export const incomeModule = {
     incomes: [],
     accounts: [],
+    companies: [],
     currencies: [],
     baseCurrency: null,
     filters: {
-        start_date: '',
-        end_date: '',
+        company_id: '',
+        year: '',
+        month: '',
         account_id: ''
     },
     dataTable: null,
+    currentYear: new Date().getFullYear(),
+    pdfGroupBy: 'month',
+    includeDetailedTables: true,
 
     async render(container) {
+        const user = api.getUser();
+        const isSuperAdmin = user?.role === 'super_admin';
+        
+        // Cargar monedas primero
+        await this.loadCurrencies();
+        
         container.innerHTML = `
             <div class="d-flex justify-content-between align-items-center mb-4">
-                <h1 class="h3">Registro de Ingresos en Efectivo</h1>
-                <button class="btn btn-primary" id="addIncomeBtn">
+                <h1 class="h3">Gestión de Ingresos</h1>
+                <button class="btn btn-success" id="addIncomeBtn">
                     <i class="bi bi-plus-circle"></i> Nuevo Ingreso
                 </button>
             </div>
             
-            <div class="alert alert-info mb-3">
-                <i class="bi bi-info-circle"></i>
-                Este módulo es exclusivo para registrar ingresos en efectivo (billetes/divisas).
-                Los ingresos bancarios se gestionan desde la Carga Masiva de Estados de Cuenta.
-            </div>
-            
-            <!-- Filtros -->
+            <!-- Filtros Avanzados -->
             <div class="card shadow-sm mb-4">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="bi bi-funnel"></i> Filtros de Búsqueda</h5>
+                </div>
                 <div class="card-body">
-                    <div class="row g-3 align-items-end">
+                    <div class="row g-3">
+                        ${isSuperAdmin ? `
                         <div class="col-md-3">
-                            <label class="form-label">Fecha desde</label>
-                            <input type="date" class="form-control" id="filterStartDate">
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">Fecha hasta</label>
-                            <input type="date" class="form-control" id="filterEndDate">
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">Cuenta</label>
-                            <select class="form-select" id="filterAccount">
-                                <option value="">Todas las cuentas</option>
+                            <label class="form-label fw-semibold">
+                                <i class="bi bi-building"></i> Empresa
+                            </label>
+                            <select class="form-select" id="filterCompany">
+                                <option value="">Todas las empresas</option>
+                                ${this.companies.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
                             </select>
                         </div>
-                        <div class="col-md-3">
-                            <button class="btn btn-primary w-100" id="applyFilters">
-                                <i class="bi bi-search"></i> Aplicar Filtros
+                        ` : ''}
+                        <div class="col-md-${isSuperAdmin ? '3' : '4'}">
+                            <label class="form-label fw-semibold">
+                                <i class="bi bi-calendar-year"></i> Año
+                            </label>
+                            <select class="form-select" id="filterYear">
+                                <option value="">Todos los años</option>
+                                ${this.generateYearOptions()}
+                            </select>
+                        </div>
+                        <div class="col-md-${isSuperAdmin ? '3' : '4'}">
+                            <label class="form-label fw-semibold">
+                                <i class="bi bi-calendar-month"></i> Mes
+                            </label>
+                            <select class="form-select" id="filterMonth">
+                                <option value="">Todos los meses</option>
+                                <option value="1">Enero</option>
+                                <option value="2">Febrero</option>
+                                <option value="3">Marzo</option>
+                                <option value="4">Abril</option>
+                                <option value="5">Mayo</option>
+                                <option value="6">Junio</option>
+                                <option value="7">Julio</option>
+                                <option value="8">Agosto</option>
+                                <option value="9">Septiembre</option>
+                                <option value="10">Octubre</option>
+                                <option value="11">Noviembre</option>
+                                <option value="12">Diciembre</option>
+                            </select>
+                        </div>
+                        <div class="col-md-${isSuperAdmin ? '3' : '4'}">
+                            <label class="form-label fw-semibold">
+                                <i class="bi bi-bank2"></i> Cuenta
+                            </label>
+                            <select class="form-select" id="filterAccount">
+                                <option value="">Todas las cuentas</option>
+                                ${this.accounts.map(acc => `<option value="${acc.id}">${acc.name}</option>`).join('')}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <button class="btn btn-success" id="applyFiltersBtn">
+                                <i class="bi bi-search"></i> Buscar
+                            </button>
+                            <button class="btn btn-secondary ms-2" id="resetFiltersBtn">
+                                <i class="bi bi-arrow-repeat"></i> Resetear Filtros
                             </button>
                         </div>
                     </div>
@@ -61,8 +111,28 @@ export const incomeModule = {
             <!-- Tabla de ingresos -->
             <div class="card shadow-sm">
                 <div class="card-header bg-white">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">Listado de Ingresos en Efectivo</h5>
+                    <div class="d-flex justify-content-between align-items-center flex-wrap">
+                        <h5 class="mb-0">Listado de Ingresos</h5>
+                        <div class="d-flex gap-3 align-items-center flex-wrap">
+                            <div class="d-flex align-items-center">
+                                <label class="mb-0 me-2">
+                                    <i class="bi bi-diagram-3"></i> Agrupar PDF por:
+                                </label>
+                                <select id="pdfGroupBySelect" class="form-select form-select-sm" style="width: auto;">
+                                    <option value="week">Semanas</option>
+                                    <option value="month" selected>Meses</option>
+                                    <option value="quarter">Trimestres</option>
+                                    <option value="semester">Semestres</option>
+                                    <option value="year">Años</option>
+                                </select>
+                            </div>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="includeDetailedTables" checked>
+                                <label class="form-check-label" for="includeDetailedTables">
+                                    <i class="bi bi-table"></i> Incluir tablas detalladas
+                                </label>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="card-body">
@@ -72,8 +142,9 @@ export const incomeModule = {
                                 <tr>
                                     <th>ID</th>
                                     <th>Fecha</th>
+                                    ${isSuperAdmin ? '<th>Empresa</th>' : ''}
                                     <th>Cuenta</th>
-                                    <th>Origen</th>        <!-- Nueva columna -->
+                                    <th>Origen</th>
                                     <th>Moneda</th>
                                     <th>Monto Original</th>
                                     <th>Tasa</th>
@@ -84,13 +155,13 @@ export const incomeModule = {
                                 </tr>
                             </thead>
                             <tbody id="incomeTableBody">
-                                <tr><td colspan="10" class="text-center">Cargando...</td></tr>
+                                <tr><td colspan="${isSuperAdmin ? '12' : '11'}" class="text-center">Cargando...</td></tr>
                             </tbody>
                             <tfoot>
                                 <tr>
-                                    <th colspan="8" class="text-end">Total en Moneda Base:</th>
+                                    <th colspan="${isSuperAdmin ? '8' : '7'}" class="text-end">Total en Moneda Base:</th>
                                     <th id="totalAmount" class="text-success">$0.00</th>
-                                    <th colspan="2"></th>
+                                    <th colspan="3"></th>
                                 </tr>
                             </tfoot>
                         </table>
@@ -98,11 +169,39 @@ export const incomeModule = {
                 </div>
             </div>
         `;
-
+        
+        if (isSuperAdmin) {
+            await this.loadCompanies();
+        }
+        
         await this.loadAccounts();
-        await this.loadCurrencies();
         await this.loadIncomes();
         this.setupEventListeners();
+    },
+
+    generateYearOptions() {
+        const currentYear = new Date().getFullYear();
+        let options = '';
+        for (let year = 2024; year <= currentYear; year++) {
+            options += `<option value="${year}">${year}</option>`;
+        }
+        return options;
+    },
+
+    async loadCompanies() {
+        try {
+            const response = await companyService.getAll();
+            if (response.success && response.data) {
+                this.companies = response.data;
+                const select = document.getElementById('filterCompany');
+                if (select) {
+                    select.innerHTML = '<option value="">Todas las empresas</option>' +
+                        this.companies.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+                }
+            }
+        } catch (error) {
+            console.error('Error loading companies:', error);
+        }
     },
 
     async loadAccounts() {
@@ -123,10 +222,10 @@ export const incomeModule = {
 
     async loadCurrencies() {
         try {
-            const response = await currencyService.getAll();
+            const response = await api.get('api/currencies');
             if (response.success && response.data) {
                 this.currencies = response.data;
-                this.baseCurrency = this.currencies.find(c => c.is_base);
+                this.baseCurrency = this.currencies.find(c => c.is_base == 1);
             }
         } catch (error) {
             console.error('Error loading currencies:', error);
@@ -135,13 +234,43 @@ export const incomeModule = {
 
     async loadIncomes() {
         try {
-            const response = await transactionService.getIncomes(this.filters);
+            const apiFilters = {};
+            
+            if (this.filters.company_id) {
+                apiFilters.company_id = this.filters.company_id;
+            }
+            if (this.filters.year) {
+                apiFilters.year = this.filters.year;
+            }
+            if (this.filters.month) {
+                apiFilters.month = this.filters.month;
+            }
+            if (this.filters.account_id) {
+                apiFilters.account_id = this.filters.account_id;
+            }
+            
+            const response = await transactionService.getIncomes(apiFilters);
+            
             if (response.success && response.data) {
                 this.incomes = response.data.incomes || response.data;
                 this.renderDataTable();
             }
         } catch (error) {
             console.error('Error loading incomes:', error);
+            showAlert('Error al cargar los ingresos', 'danger');
+        }
+    },
+
+    async getExchangeRate(fromCurrencyId, toCurrencyId, date) {
+        try {
+            const response = await api.get(`api/exchange-rates?from=${fromCurrencyId}&to=${toCurrencyId}&date=${date}`);
+            if (response.success && response.data && response.data.rate) {
+                return { success: true, rate: parseFloat(response.data.rate) };
+            }
+            return { success: false, rate: null };
+        } catch (error) {
+            console.error('Error getting exchange rate:', error);
+            return { success: false, rate: null };
         }
     },
 
@@ -150,51 +279,45 @@ export const incomeModule = {
             this.dataTable.destroy();
         }
 
+        const user = api.getUser();
+        const isSuperAdmin = user?.role === 'super_admin';
+        
         const total = this.incomes.reduce((sum, inc) => sum + (parseFloat(inc.amount_base_currency || inc.amount) || 0), 0);
 
-        const self = this;
-
-        // ✅ Asegurar que la variable se llama 'income' dentro del map
         const tableData = this.incomes.map(income => {
-            const isBankIncome = income.payment_method === 'bank';
-
-            return [
+            const row = [
                 income.id,
                 formatDate(income.date),
+            ];
+            
+            if (isSuperAdmin) {
+                row.push(income.company_name || '-');
+            }
+            
+            row.push(
                 income.account_name || '-',
-                isBankIncome ?
-                    '<span class="badge bg-secondary">Banco</span>' :
-                    '<span class="badge bg-success">Efectivo</span>',
+                income.payment_method === 'bank' ? 
+                    '<span class="badge bg-secondary"><i class="bi bi-bank"></i> Banco</span>' : 
+                    '<span class="badge bg-success"><i class="bi bi-cash"></i> Efectivo</span>',
                 income.currency_code || 'VES',
                 `${parseFloat(income.amount).toFixed(2)} ${income.currency_code || 'VES'}`,
                 income.exchange_rate || 1,
                 formatCurrency(parseFloat(income.amount_base_currency || income.amount)),
                 income.description || '-',
                 income.reference || '-',
-                isBankIncome ? `
-                <div class="btn-group btn-group-sm">
-                    <button class="btn btn-outline-secondary" disabled title="Ingreso bancario - No editable">
-                        <i class="bi bi-pencil"></i>
-                    </button>
-                    <button class="btn btn-outline-danger delete-income" data-id="${income.id}" title="Eliminar">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                </div>
-            ` : `
-                <div class="btn-group btn-group-sm">
-                    <button class="btn btn-outline-primary edit-income" data-id="${income.id}" title="Editar">
-                        <i class="bi bi-pencil"></i>
-                    </button>
-                    <button class="btn btn-outline-danger delete-income" data-id="${income.id}" title="Eliminar">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                </div>
-            `
-            ];
+                `
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-primary edit-income" data-id="${income.id}" title="Editar ingreso">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-outline-danger delete-income" data-id="${income.id}" title="Eliminar">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                `
+            );
+            return row;
         });
-
-        // Calcular total para el PDF
-        const totalAmount = this.incomes.reduce((sum, inc) => sum + (parseFloat(inc.amount_base_currency || inc.amount) || 0), 0);
 
         this.dataTable = $('#incomeTable').DataTable({
             data: tableData,
@@ -204,368 +327,395 @@ export const incomeModule = {
             order: [[1, 'desc']],
             columnDefs: [
                 { targets: 0, visible: false },
-                { targets: 10, orderable: false, searchable: false }  // Índice actualizado
+                { targets: tableData[0]?.length - 1, orderable: false, searchable: false }
             ],
-            dom: '<"row"<"col-sm-6"B><"col-sm-6"f>>' +
-                '<"row"<"col-sm-12"tr>>' +
-                '<"row"<"col-sm-5"i><"col-sm-7"p>>',
+            dom: 'Bfrtip',
             buttons: [
-                {
-                    extend: 'copy',
-                    text: '<i class="bi bi-files"></i> Copiar',
-                    className: 'btn btn-sm btn-secondary me-1',
-                    exportOptions: { columns: [1, 2, 3, 4, 5, 6, 7, 8, 9] }  // ✅ AQUÍ
-                },
-                {
-                    extend: 'csv',
-                    text: '<i class="bi bi-filetype-csv"></i> CSV',
-                    className: 'btn btn-sm btn-info me-1',
-                    exportOptions: { columns: [1, 2, 3, 4, 5, 6, 7, 8, 9] }  // ✅ AQUÍ
-                },
-                {
-                    extend: 'excel',
-                    text: '<i class="bi bi-file-excel"></i> Excel',
-                    className: 'btn btn-sm btn-success me-1',
-                    exportOptions: { columns: [1, 2, 3, 4, 5, 6, 7, 8, 9] },  // ✅ AQUÍ
-                    title: 'Ingresos_Efectivo',
-                    filename: 'Relación_de_ingresos_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-')
-                },
-                {
-                    extend: 'pdf',
-                    text: '<i class="bi bi-file-pdf"></i> PDF',
+                { extend: 'copy', text: '<i class="bi bi-files"></i> Copiar', className: 'btn btn-sm btn-secondary me-1' },
+                { extend: 'csv', text: '<i class="bi bi-filetype-csv"></i> CSV', className: 'btn btn-sm btn-info me-1' },
+                { extend: 'excel', text: '<i class="bi bi-file-excel"></i> Excel', className: 'btn btn-sm btn-success me-1' },
+                { 
+                    text: '<i class="bi bi-file-pdf"></i> PDF Personalizado',
                     className: 'btn btn-sm btn-danger me-1',
-                    exportOptions: { columns: [1, 2, 3, 4, 5, 6, 7, 8, 9] },  // ✅ AQUÍ
-                    title: 'Reporte de Ingresos en Efectivo',
-                    filename: 'Relación_de_ingresos_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-'),
-                    orientation: 'landscape',
-                    pageSize: 'A4',
-                    customize: function (doc) {
-                        // ... configuración del PDF
-                    }
+                    action: () => this.exportToPDFWithGrouping()
                 },
-                {
-                    extend: 'print',
-                    text: '<i class="bi bi-printer"></i> Imprimir',
-                    className: 'btn btn-sm btn-secondary me-1',
-                    exportOptions: { columns: [1, 2, 3, 4, 5, 6, 7, 8, 9] },  // ✅ AQUÍ
-                    title: 'Reporte de Ingresos en Efectivo',
-                    customize: function (win) {
-                        // ... configuración de impresión
-                    }
-                }
+                { extend: 'print', text: '<i class="bi bi-printer"></i> Imprimir', className: 'btn btn-sm btn-secondary me-1' }
             ],
             drawCallback: () => {
                 document.getElementById('totalAmount').innerHTML = formatCurrency(total);
                 this.attachTableEvents();
             }
         });
-
+        
+        // Eventos de agrupación
+        const groupBySelect = document.getElementById('pdfGroupBySelect');
+        if (groupBySelect) {
+            groupBySelect.addEventListener('change', (e) => {
+                this.pdfGroupBy = e.target.value;
+            });
+        }
+        
+        const includeTablesCheckbox = document.getElementById('includeDetailedTables');
+        if (includeTablesCheckbox) {
+            includeTablesCheckbox.addEventListener('change', (e) => {
+                this.includeDetailedTables = e.target.checked;
+            });
+        }
+        
+        this.updateActiveFiltersIndicator();
         this.attachTableEvents();
     },
 
+    updateActiveFiltersIndicator() {
+        const activeFilters = [];
+        
+        if (this.filters.company_id && this.filters.company_id !== '') {
+            const companyName = this.companies.find(c => c.id == this.filters.company_id)?.name;
+            activeFilters.push(`Empresa: ${companyName || this.filters.company_id}`);
+        }
+        if (this.filters.year && this.filters.year !== '') {
+            activeFilters.push(`Año: ${this.filters.year}`);
+        }
+        if (this.filters.month && this.filters.month !== '') {
+            const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+                            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+            activeFilters.push(`Mes: ${months[parseInt(this.filters.month) - 1]}`);
+        }
+        if (this.filters.account_id && this.filters.account_id !== '') {
+            const accountName = this.accounts.find(a => a.id == this.filters.account_id)?.name;
+            activeFilters.push(`Cuenta: ${accountName || this.filters.account_id}`);
+        }
+        
+        const existingIndicator = document.querySelector('.active-filters-indicator');
+        if (existingIndicator) existingIndicator.remove();
+        
+        if (activeFilters.length > 0) {
+            const indicatorHtml = `
+                <div class="alert alert-success mt-2 active-filters-indicator">
+                    <i class="bi bi-funnel-fill"></i> <strong>Filtros activos:</strong> ${activeFilters.join(' | ')}
+                    <button type="button" class="btn-close float-end" id="clearFiltersBtn" aria-label="Cerrar" style="font-size: 0.75rem;"></button>
+                </div>
+            `;
+            
+            const cardBody = document.querySelector('#incomeTable').closest('.card-body');
+            if (cardBody) {
+                let filterContainer = document.querySelector('.filters-indicator-container');
+                if (!filterContainer) {
+                    filterContainer = document.createElement('div');
+                    filterContainer.className = 'filters-indicator-container';
+                    cardBody.insertBefore(filterContainer, cardBody.firstChild);
+                }
+                filterContainer.innerHTML = indicatorHtml;
+                
+                const clearBtn = document.getElementById('clearFiltersBtn');
+                if (clearBtn) {
+                    clearBtn.addEventListener('click', () => this.resetAllFilters());
+                }
+            }
+        } else {
+            const filterContainer = document.querySelector('.filters-indicator-container');
+            if (filterContainer) filterContainer.innerHTML = '';
+        }
+    },
+
+    resetAllFilters() {
+        if (document.getElementById('filterCompany')) {
+            document.getElementById('filterCompany').value = '';
+        }
+        if (document.getElementById('filterYear')) {
+            document.getElementById('filterYear').value = '';
+        }
+        if (document.getElementById('filterMonth')) {
+            document.getElementById('filterMonth').value = '';
+        }
+        if (document.getElementById('filterAccount')) {
+            document.getElementById('filterAccount').value = '';
+        }
+        
+        this.filters = { company_id: '', year: '', month: '', account_id: '' };
+        
+        const existingIndicator = document.querySelector('.active-filters-indicator');
+        if (existingIndicator) existingIndicator.remove();
+        
+        const filterContainer = document.querySelector('.filters-indicator-container');
+        if (filterContainer) filterContainer.innerHTML = '';
+        
+        this.loadIncomes();
+        showAlert('Filtros reiniciados - Mostrando todos los ingresos', 'success');
+    },
+
     showIncomeModal(income = null) {
-        const isEditing = !!income;
-        const today = new Date().toISOString().split('T')[0];
-        const isBankIncome = income && income.payment_method === 'bank'; // Si viene de carga masiva
-
-        // Determinar si la referencia debe ser editable
-        const isReferenceEditable = !isBankIncome; // Solo editable si NO es de banco
-
+        const isEdit = !!income;
+        const title = isEdit ? 'Editar Ingreso' : 'Nuevo Ingreso';
+        
         const modalHtml = `
             <div class="modal fade" id="incomeModal" tabindex="-1" data-bs-backdrop="static">
-                <div class="modal-dialog">
+                <div class="modal-dialog modal-lg">
                     <div class="modal-content">
-                        <div class="modal-header ${isBankIncome ? 'bg-secondary' : 'bg-success'} text-white">
+                        <div class="modal-header bg-success text-white">
                             <h5 class="modal-title">
-                                <i class="bi bi-cash-stack"></i> 
-                                ${isEditing ? 'Editar Ingreso' : 'Nuevo Ingreso en Efectivo'}
-                                ${isBankIncome ? ' <span class="badge bg-warning text-dark">(Importado de Banco)</span>' : ''}
+                                <i class="bi bi-cash-stack"></i> ${title}
                             </h5>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                         </div>
                         <div class="modal-body">
                             <form id="incomeForm">
-                                <!-- Cuenta (siempre editable) -->
-                                <div class="mb-3">
-                                    <label class="form-label fw-semibold">Cuenta *</label>
-                                    <select class="form-select" id="incomeAccount" required>
-                                        <option value="">Seleccione una cuenta</option>
-                                        ${this.accounts.map(acc => `
-                                            <option value="${acc.id}" ${income && income.account_id === acc.id ? 'selected' : ''}>
-                                                ${acc.name}
-                                            </option>
-                                        `).join('')}
-                                    </select>
+                                <input type="hidden" id="incomeId" value="${income?.id || ''}">
+                                
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label required">Fecha</label>
+                                        <input type="date" class="form-control" id="incomeDate" 
+                                               value="${income?.date || new Date().toISOString().split('T')[0]}" required>
+                                    </div>
+                                    
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label required">Cuenta de Ingreso</label>
+                                        <select class="form-select" id="incomeAccount" required>
+                                            <option value="">Seleccione una cuenta</option>
+                                            ${this.accounts.filter(acc => acc.type === 'income').map(acc => `
+                                                <option value="${acc.id}" ${income?.account_id == acc.id ? 'selected' : ''}>
+                                                    ${acc.name} ${acc.category ? `(${acc.category})` : ''}
+                                                </option>
+                                            `).join('')}
+                                        </select>
+                                    </div>
                                 </div>
                                 
-                                <!-- Moneda y Monto -->
                                 <div class="row">
-                                    <div class="col-md-6">
-                                        <div class="mb-3">
-                                            <label class="form-label fw-semibold">Moneda *</label>
-                                            <select class="form-select" id="currencyId" ${isBankIncome ? 'disabled' : ''} required>
-                                                ${this.currencies.map(c => `
-                                                    <option value="${c.id}" data-code="${c.code}" data-symbol="${c.symbol}" 
-                                                            ${income && income.currency_id === c.id ? 'selected' : ''}>
-                                                        ${c.code} - ${c.name} (${c.symbol})
-                                                    </option>
-                                                `).join('')}
-                                            </select>
-                                            ${isBankIncome ? '<small class="text-muted">La moneda no se puede modificar en ingresos bancarios</small>' : ''}
-                                        </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label required">Monto</label>
+                                        <input type="number" step="0.01" class="form-control" id="incomeAmount" 
+                                               value="${income?.amount || ''}" placeholder="0.00" required>
                                     </div>
-                                    <div class="col-md-6">
-                                        <div class="mb-3">
-                                            <label class="form-label fw-semibold">Monto *</label>
-                                            <div class="input-group">
-                                                <input type="number" class="form-control" id="incomeAmount" 
-                                                    step="0.01" value="${income ? income.amount : ''}" 
-                                                    placeholder="0.00" ${isBankIncome ? 'readonly' : ''} required>
-                                                <span class="input-group-text" id="currencySymbol">Bs.</span>
-                                            </div>
-                                            ${isBankIncome ? '<small class="text-muted">El monto no se puede modificar en ingresos bancarios</small>' : ''}
+                                    
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label required">Moneda</label>
+                                        <select class="form-select" id="incomeCurrency" required>
+                                            <option value="">Seleccione una moneda</option>
+                                            ${this.currencies.map(curr => `
+                                                <option value="${curr.id}" 
+                                                    ${income?.currency_id == curr.id ? 'selected' : ''}>
+                                                    ${curr.code} - ${curr.name} (${curr.symbol})
+                                                </option>
+                                            `).join('')}
+                                        </select>
+                                    </div>
+                                    
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Tasa de cambio</label>
+                                        <div class="input-group">
+                                            <span class="input-group-text bg-success text-white">
+                                                <i class="bi bi-currency-exchange"></i>
+                                            </span>
+                                            <input type="text" class="form-control" id="exchangeRateInfo" 
+                                                   readonly placeholder="Se calculará automáticamente">
                                         </div>
+                                        <small class="text-muted" id="rateDateInfo"></small>
                                     </div>
                                 </div>
-
-                                <!-- Fecha y Referencia -->
+                                
+                                <div class="alert alert-success mb-3" id="baseAmountInfo" style="display: none;">
+                                    <i class="bi bi-currency-exchange"></i>
+                                    <strong>Monto en moneda base (${this.baseCurrency?.code || 'VES'}):</strong>
+                                    <span id="baseAmountDisplay">0.00</span>
+                                </div>
+                                
                                 <div class="row">
-                                    <div class="col-md-6">
-                                        <div class="mb-3">
-                                            <label class="form-label fw-semibold">Fecha *</label>
-                                            <input type="date" class="form-control" id="incomeDate" 
-                                                value="${income ? income.date : today}" 
-                                                max="${today}" ${isBankIncome ? 'readonly' : ''} required>
-                                            ${isBankIncome ? '<small class="text-muted">La fecha no se puede modificar en ingresos bancarios</small>' : ''}
-                                        </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Referencia</label>
+                                        <input type="text" class="form-control" id="incomeReference" 
+                                               value="${income?.reference || ''}" placeholder="N° de comprobante, factura, etc.">
                                     </div>
-                                    <div class="col-md-6">
-                                        <div class="mb-3">
-                                            <label class="form-label fw-semibold">Referencia</label>
-                                            <input type="text" class="form-control" id="incomeReference" 
-                                                value="${income ? (income.reference || '') : ''}"
-                                                placeholder="Recibo #, comprobante, etc."
-                                                ${isBankIncome ? 'readonly' : ''}>
-                                            <small class="text-muted">
-                                                ${isBankIncome ? 'Referencia del estado de cuenta (no editable)' : 'Opcional - Número de recibo, factura, etc.'}
-                                            </small>
-                                        </div>
+                                    
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label required">Método de Pago</label>
+                                        <select class="form-select" id="incomePaymentMethod" required>
+                                            <option value="cash" ${income?.payment_method === 'cash' || !income ? 'selected' : ''}>
+                                                💵 Efectivo
+                                            </option>
+                                            <option value="bank" ${income?.payment_method === 'bank' ? 'selected' : ''}>
+                                                🏦 Banco
+                                            </option>
+                                        </select>
                                     </div>
                                 </div>
-
-                                <!-- Conversión de moneda (solo visible si aplica) -->
-                                <div id="conversionSection" class="alert alert-info" style="display: none;">
-                                    <!-- ... contenido de conversión ... -->
-                                </div>
-
-                                <!-- Descripción -->
+                                
                                 <div class="mb-3">
-                                    <label class="form-label fw-semibold">Descripción</label>
-                                    <textarea class="form-control" id="incomeDescription" rows="2" 
-                                            placeholder="Descripción del ingreso...">${income ? income.description || '' : ''}</textarea>
+                                    <label class="form-label">Descripción</label>
+                                    <textarea class="form-control" id="incomeDescription" rows="3" 
+                                              placeholder="Descripción detallada del ingreso...">${income?.description || ''}</textarea>
                                 </div>
                             </form>
                         </div>
                         <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                            <button type="button" class="btn btn-${isBankIncome ? 'secondary' : 'success'}" id="saveIncomeBtn" ${isBankIncome ? 'disabled' : ''}>
-                                ${isEditing ? 'Actualizar' : 'Guardar'}
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                                <i class="bi bi-x-circle"></i> Cancelar
                             </button>
-                            ${isBankIncome ? '<small class="text-muted ms-2">Los ingresos bancarios no se pueden editar</small>' : ''}
+                            <button type="button" class="btn btn-success" id="saveIncomeBtn">
+                                <i class="bi bi-save"></i> ${isEdit ? 'Actualizar' : 'Guardar'} Ingreso
+                            </button>
                         </div>
                     </div>
                 </div>
             </div>
         `;
-
+        
         const existingModal = document.getElementById('incomeModal');
         if (existingModal) existingModal.remove();
-
+        
         document.body.insertAdjacentHTML('beforeend', modalHtml);
-        const modalElement = document.getElementById('incomeModal');
-        const modal = new bootstrap.Modal(modalElement);
-
-        this.setupModalEvents(modal, isEditing, income);
-
+        
+        this.setupExchangeRateEvents();
+        
+        const modal = new bootstrap.Modal(document.getElementById('incomeModal'));
         modal.show();
-        modalElement.addEventListener('hidden.bs.modal', () => modalElement.remove());
+        
+        const saveBtn = document.getElementById('saveIncomeBtn');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', async () => await this.saveIncome(income));
+        }
     },
 
-    setupModalEvents(modal, isEditing, existingIncome) {
-        const currencySelect = document.getElementById('currencyId');
+    setupExchangeRateEvents() {
+        const dateInput = document.getElementById('incomeDate');
+        const currencySelect = document.getElementById('incomeCurrency');
         const amountInput = document.getElementById('incomeAmount');
-        const conversionSection = document.getElementById('conversionSection');
-        const originalAmountDisplay = document.getElementById('originalAmountDisplay');
-        const convertedAmountDisplay = document.getElementById('convertedAmountDisplay');
-        const exchangeRateDisplay = document.getElementById('exchangeRateDisplay');
-        const currencySymbolSpan = document.getElementById('currencySymbol');
-
-        // Actualizar símbolo de moneda al cambiar
-        const updateCurrencySymbol = () => {
-            const selectedOption = currencySelect.options[currencySelect.selectedIndex];
-            const symbol = selectedOption.dataset.symbol || 'Bs.';
-            currencySymbolSpan.textContent = symbol;
-            this.calculateConversion();
-        };
-
-        currencySelect.addEventListener('change', updateCurrencySymbol);
-        amountInput.addEventListener('input', () => this.calculateConversion());
-
-        // Método para calcular conversión
-        this.calculateConversion = async () => {
-            const amount = parseFloat(amountInput.value) || 0;
-            const currencyId = parseInt(currencySelect.value);
-            const selectedCurrency = this.currencies.find(c => c.id === currencyId);
-
-            console.log('Calculando conversión:', {
-                amount,
-                currencyId,
-                selectedCurrency,
-                baseCurrency: this.baseCurrency
-            });
-
-            if (this.baseCurrency && selectedCurrency && selectedCurrency.id !== this.baseCurrency.id) {
-                conversionSection.style.display = 'block';
-                const date = document.getElementById('incomeDate').value;
-
-                originalAmountDisplay.textContent = `${formatCurrency(amount)} ${selectedCurrency.code}`;
-
-                // ✅ Usar códigos de moneda
-                const rate = await this.getExchangeRate(selectedCurrency.code, this.baseCurrency.code, date);
-                console.log('Tasa obtenida:', rate);
-
-                if (rate && rate > 0) {
-                    const convertedAmount = amount * rate;
-                    convertedAmountDisplay.textContent = formatCurrency(convertedAmount);
-                    exchangeRateDisplay.textContent = `Tasa: 1 ${selectedCurrency.code} = ${formatCurrency(rate)} ${this.baseCurrency.code}`;
-                } else {
-                    convertedAmountDisplay.textContent = 'No disponible';
-                    exchangeRateDisplay.textContent = '⚠️ No se encontró tasa de cambio para esta fecha. Verifique en Tasas de Cambio.';
-                    conversionSection.classList.add('alert-warning');
-                    conversionSection.classList.remove('alert-info');
-                }
+        const rateInfo = document.getElementById('exchangeRateInfo');
+        const baseAmountSpan = document.getElementById('baseAmountDisplay');
+        const baseAmountDiv = document.getElementById('baseAmountInfo');
+        const rateDateInfo = document.getElementById('rateDateInfo');
+        
+        const updateExchangeRate = async () => {
+            const date = dateInput?.value;
+            const currencyId = currencySelect?.value;
+            const amount = parseFloat(amountInput?.value) || 0;
+            
+            if (!date || !currencyId || amount <= 0) {
+                if (rateInfo) rateInfo.value = 'Esperando datos...';
+                if (baseAmountDiv) baseAmountDiv.style.display = 'none';
+                return;
+            }
+            
+            const selectedCurrency = this.currencies.find(c => c.id == currencyId);
+            
+            if (selectedCurrency?.is_base == 1) {
+                if (rateInfo) rateInfo.value = '1.00 (Moneda base)';
+                if (baseAmountSpan) baseAmountSpan.textContent = amount.toFixed(2);
+                if (baseAmountDiv) baseAmountDiv.style.display = 'block';
+                if (rateDateInfo) rateDateInfo.textContent = '';
+                return;
+            }
+            
+            const result = await this.getExchangeRate(currencyId, this.baseCurrency?.id, date);
+            
+            if (result.success && result.rate) {
+                const convertedAmount = amount * result.rate;
+                if (rateInfo) rateInfo.value = `${result.rate.toFixed(4)} (${selectedCurrency?.code} → ${this.baseCurrency?.code})`;
+                if (baseAmountSpan) baseAmountSpan.textContent = convertedAmount.toFixed(2);
+                if (baseAmountDiv) baseAmountDiv.style.display = 'block';
+                if (rateDateInfo) rateDateInfo.textContent = `Tasa vigente al ${date}`;
             } else {
-                conversionSection.style.display = 'none';
-                conversionSection.classList.remove('alert-warning');
-                conversionSection.classList.add('alert-info');
+                if (rateInfo) rateInfo.value = 'No hay tasa disponible para esta fecha';
+                if (baseAmountSpan) baseAmountSpan.textContent = 'Sin conversión';
+                if (baseAmountDiv) baseAmountDiv.style.display = 'block';
+                if (rateDateInfo) rateDateInfo.textContent = '⚠️ Configure una tasa de cambio para esta fecha';
             }
         };
+        
+        if (dateInput) dateInput.addEventListener('change', updateExchangeRate);
+        if (currencySelect) currencySelect.addEventListener('change', updateExchangeRate);
+        if (amountInput) amountInput.addEventListener('input', updateExchangeRate);
+        
+        updateExchangeRate();
+    },
 
-        // Inicializar
-        updateCurrencySymbol();
-
-        // Guardar ingreso
-        const saveBtn = document.getElementById('saveIncomeBtn');
-        saveBtn.addEventListener('click', async () => {
-            const accountId = document.getElementById('incomeAccount').value;
-            const amount = parseFloat(document.getElementById('incomeAmount').value);
-            const date = document.getElementById('incomeDate').value;
-            const description = document.getElementById('incomeDescription').value;
-            const reference = document.getElementById('incomeReference').value;
-            const currencyId = document.getElementById('currencyId').value;
-
-            if (!accountId) {
-                showAlert('Seleccione una cuenta', 'warning');
-                return;
-            }
-
-            if (!amount || amount <= 0) {
-                showAlert('Ingrese un monto válido', 'warning');
-                return;
-            }
-
+    async saveIncome(existingIncome = null) {
+        try {
+            const id = document.getElementById('incomeId')?.value;
+            const date = document.getElementById('incomeDate')?.value;
+            const accountId = document.getElementById('incomeAccount')?.value;
+            const amount = document.getElementById('incomeAmount')?.value;
+            const currencyId = document.getElementById('incomeCurrency')?.value;
+            const reference = document.getElementById('incomeReference')?.value;
+            const description = document.getElementById('incomeDescription')?.value;
+            const paymentMethod = document.getElementById('incomePaymentMethod')?.value;
+            
             if (!date) {
-                showAlert('Seleccione una fecha', 'warning');
+                showAlert('La fecha es requerida', 'warning');
                 return;
             }
-
-            if (date > new Date().toISOString().split('T')[0]) {
+            
+            if (!accountId) {
+                showAlert('Debe seleccionar una cuenta de ingreso', 'warning');
+                return;
+            }
+            
+            if (!amount || parseFloat(amount) <= 0) {
+                showAlert('El monto debe ser mayor a 0', 'warning');
+                return;
+            }
+            
+            if (!currencyId) {
+                showAlert('Debe seleccionar una moneda', 'warning');
+                return;
+            }
+            
+            if (!paymentMethod) {
+                showAlert('El método de pago es requerido', 'warning');
+                return;
+            }
+            
+            const today = new Date().toISOString().split('T')[0];
+            if (date > today) {
                 showAlert('No se puede registrar un ingreso con fecha futura', 'warning');
                 return;
             }
-
+            
             const incomeData = {
                 account_id: parseInt(accountId),
-                amount: amount,
-                date: date,
-                description: description,
-                reference: reference,
+                amount: parseFloat(amount),
                 currency_id: parseInt(currencyId),
-                payment_method: 'cash'  // Efectivo
+                date: date,
+                reference: reference || null,
+                description: description || null,
+                payment_method: paymentMethod
             };
-
-            // Calcular conversión
-            if (this.baseCurrency && currencyId && currencyId != this.baseCurrency.id) {
-                const rate = await this.getExchangeRate(currencyId, this.baseCurrency.id, date);
-                if (rate) {
-                    incomeData.exchange_rate = rate;
-                    incomeData.amount_base_currency = amount * rate;
+            
+            let response;
+            
+            if (id && id !== '') {
+                response = await transactionService.updateIncome(parseInt(id), incomeData);
+                if (response.success) {
+                    showAlert('Ingreso actualizado exitosamente', 'success');
+                    this.loadIncomes();
+                    this.closeModal();
+                }
+            } else {
+                response = await transactionService.createIncome(incomeData);
+                if (response.success) {
+                    showAlert('Ingreso registrado exitosamente', 'success');
+                    this.loadIncomes();
+                    this.closeModal();
                 }
             }
-
-            saveBtn.disabled = true;
-            saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span> Guardando...';
-
-            try {
-                let response;
-                if (isEditing) {
-                    response = await transactionService.updateIncome(existingIncome.id, incomeData);
-                    if (response.success) showAlert('Ingreso actualizado exitosamente', 'success');
-                } else {
-                    response = await transactionService.createIncome(incomeData);
-                    if (response.success) showAlert('Ingreso registrado exitosamente', 'success');
-                }
-
-                modal.hide();
-                await this.loadIncomes();
-
-            } catch (error) {
-                console.error('Error saving income:', error);
-                showAlert(error.message || 'Error al guardar el ingreso', 'danger');
-            } finally {
-                saveBtn.disabled = false;
-                saveBtn.innerHTML = isEditing ? 'Actualizar' : 'Guardar';
+            
+            if (!response.success) {
+                showAlert(response.message || 'Error al guardar el ingreso', 'danger');
             }
-        });
+            
+        } catch (error) {
+            console.error('Error en saveIncome:', error);
+            showAlert(error.message || 'Error al guardar el ingreso', 'danger');
+        }
     },
 
-    async getExchangeRate(fromCurrencyCode, toCurrencyCode, date) {
-        try {
-            console.log(`Consultando tasa: ${fromCurrencyCode} -> ${toCurrencyCode} fecha: ${date}`);
-
-            // Obtener IDs de las monedas
-            const fromCurrency = this.currencies.find(c => c.code === fromCurrencyCode);
-            const toCurrency = this.currencies.find(c => c.code === toCurrencyCode);
-
-            if (!fromCurrency || !toCurrency) {
-                console.error('Moneda no encontrada:', { fromCurrencyCode, toCurrencyCode });
-                return null;
-            }
-
-            // Usar el servicio api que ya incluye el token
-            const response = await api.get(`api/exchange-rates?from=${fromCurrency.id}&to=${toCurrency.id}&date=${date}`);
-
-            console.log('Respuesta de tasa:', response);
-
-            if (response.success && response.data && response.data.rate) {
-                return parseFloat(response.data.rate);
-            }
-
-            // Si no encuentra, intentar la tasa inversa
-            if (response.success && response.data && response.data.rate === null) {
-                console.log('Tasa no encontrada, intentando inversa...');
-                const inverseResponse = await api.get(`api/exchange-rates?from=${toCurrency.id}&to=${fromCurrency.id}&date=${date}`);
-
-                if (inverseResponse.success && inverseResponse.data && inverseResponse.data.rate) {
-                    const inverseRate = parseFloat(inverseResponse.data.rate);
-                    return 1 / inverseRate;
-                }
-            }
-
-            return null;
-        } catch (error) {
-            console.error('Error getting exchange rate:', error);
-            return null;
+    closeModal() {
+        const modal = document.getElementById('incomeModal');
+        if (modal) {
+            const bootstrapModal = bootstrap.Modal.getInstance(modal);
+            if (bootstrapModal) bootstrapModal.hide();
+            setTimeout(() => modal.remove(), 300);
         }
     },
 
@@ -577,16 +727,16 @@ export const incomeModule = {
                 if (income) this.showIncomeModal(income);
             });
         });
-
+        
         document.querySelectorAll('.delete-income').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const id = parseInt(btn.dataset.id);
                 const income = this.incomes.find(i => i.id === id);
                 if (!income) return;
-
+                
                 const confirmed = confirm(`¿Está seguro de eliminar el ingreso de ${formatCurrency(income.amount)} del ${formatDate(income.date)}?`);
                 if (!confirmed) return;
-
+                
                 try {
                     const response = await transactionService.deleteIncome(id);
                     if (response.success) {
@@ -602,41 +752,98 @@ export const incomeModule = {
 
     setupEventListeners() {
         const addBtn = document.getElementById('addIncomeBtn');
-        if (addBtn) addBtn.addEventListener('click', () => this.showIncomeModal());
-
-        const applyFilters = document.getElementById('applyFilters');
-        if (applyFilters) {
-            applyFilters.addEventListener('click', () => {
+        if (addBtn) {
+            const newAddBtn = addBtn.cloneNode(true);
+            addBtn.parentNode.replaceChild(newAddBtn, addBtn);
+            newAddBtn.addEventListener('click', () => {
+                const incomeAccounts = this.accounts.filter(acc => acc.type === 'income');
+                if (incomeAccounts.length === 0) {
+                    showAlert('No hay cuentas de ingreso configuradas. Por favor, crea una cuenta de ingreso primero.', 'warning');
+                    return;
+                }
+                this.showIncomeModal();
+            });
+        }
+        
+        const applyBtn = document.getElementById('applyFiltersBtn');
+        if (applyBtn) {
+            applyBtn.addEventListener('click', () => {
                 this.filters = {
-                    start_date: document.getElementById('filterStartDate').value,
-                    end_date: document.getElementById('filterEndDate').value,
-                    account_id: document.getElementById('filterAccount').value
+                    company_id: document.getElementById('filterCompany')?.value || '',
+                    year: document.getElementById('filterYear')?.value || '',
+                    month: document.getElementById('filterMonth')?.value || '',
+                    account_id: document.getElementById('filterAccount')?.value || ''
                 };
                 this.loadIncomes();
             });
         }
-
-        const filterStart = document.getElementById('filterStartDate');
-        const filterEnd = document.getElementById('filterEndDate');
-        const filterAccount = document.getElementById('filterAccount');
-
-        if (filterStart) filterStart.addEventListener('change', () => applyFilters?.click());
-        if (filterEnd) filterEnd.addEventListener('change', () => applyFilters?.click());
-        if (filterAccount) filterAccount.addEventListener('change', () => applyFilters?.click());
-
-        // Botones de exportación
-        const exportExcelBtn = document.getElementById('exportExcelBtn');
-        if (exportExcelBtn) {
-            exportExcelBtn.addEventListener('click', () => {
-                if (this.dataTable) this.dataTable.button('.buttons-excel').trigger();
-            });
+        
+        const resetBtn = document.getElementById('resetFiltersBtn');
+        if (resetBtn) {
+            resetBtn.addEventListener('click', () => this.resetAllFilters());
         }
+    },
 
-        const exportPdfBtn = document.getElementById('exportPdfBtn');
-        if (exportPdfBtn) {
-            exportPdfBtn.addEventListener('click', () => {
-                if (this.dataTable) this.dataTable.button('.buttons-pdf').trigger();
-            });
+    exportToPDFWithGrouping() {
+        if (!this.incomes || this.incomes.length === 0) {
+            showAlert('No hay datos para exportar', 'warning');
+            return;
         }
+        
+        const user = api.getUser();
+        const isSuperAdmin = user?.role === 'super_admin';
+        const showAllCompanies = isSuperAdmin && (!this.filters.company_id || this.filters.company_id === '');
+        
+        const filtersInfo = {
+            company_name: this.filters.company_id && this.filters.company_id !== '' ? 
+                this.companies.find(c => c.id == this.filters.company_id)?.name : null,
+            year: this.filters.year,
+            month_name: this.filters.month && this.filters.month !== '' ? 
+                this.getMonthName(this.filters.month) : null,
+            account_name: this.filters.account_id && this.filters.account_id !== '' ? 
+                this.accounts.find(a => a.id == this.filters.account_id)?.name : null
+        };
+        
+        pdfExportService.exportIncomesToPDF(
+            this.incomes, 
+            filtersInfo, 
+            this.pdfGroupBy, 
+            isSuperAdmin,
+            showAllCompanies,
+            this.includeDetailedTables
+        );
+        
+        const groupByText = this.getGroupByText(this.pdfGroupBy);
+        const tablesText = this.includeDetailedTables ? 'con tablas detalladas' : 'solo resumen y gráficos';
+        
+        if (showAllCompanies) {
+            showAlert(`Exportando PDF agrupado por empresa y luego por ${groupByText} ${tablesText}...`, 'success');
+        } else {
+            showAlert(`Exportando PDF agrupado por ${groupByText} ${tablesText}...`, 'success');
+        }
+    },
+
+    getMonthName(monthNumber) {
+        const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+                       'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+        return months[parseInt(monthNumber) - 1];
+    },
+
+    getGroupByText(groupBy) {
+        const texts = {
+            'week': 'semanas',
+            'month': 'meses',
+            'quarter': 'trimestres',
+            'semester': 'semestres',
+            'year': 'años'
+        };
+        return texts[groupBy] || 'meses';
+    },
+
+    escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 };

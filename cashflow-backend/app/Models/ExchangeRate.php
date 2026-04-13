@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use PDO;
+
 class ExchangeRate extends BaseModel
 {
     protected $table = 'exchange_rates';
@@ -120,4 +122,72 @@ class ExchangeRate extends BaseModel
         $stmt->execute();
         return $stmt->fetchAll();
     }
+
+    // app/Models/ExchangeRate.php - Agregar este método
+
+    /**
+     * Contar tasas de cambio que usan una moneda específica
+     * 
+     * @param int $currencyId ID de la moneda
+     * @return int
+     */
+    public function countByCurrency(int $currencyId): int
+    {
+        // ✅ Usar marcadores de posición con nombres diferentes para evitar conflictos
+        $sql = "SELECT COUNT(*) as total FROM {$this->table} 
+            WHERE from_currency_id = :from_id OR to_currency_id = :to_id";
+
+        $stmt = $this->db->prepare($sql);
+        // ✅ Usar el mismo valor para ambos parámetros
+        $stmt->bindValue(':from_id', $currencyId, PDO::PARAM_INT);
+        $stmt->bindValue(':to_id', $currencyId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $result = $stmt->fetch();
+        return (int) ($result['total'] ?? 0);
+    }
+
+    /**
+     * Obtener todas las tasas de cambio (histórico completo)
+     */
+    public function getAllRates(): array
+    {
+        $sql = "SELECT er.*, 
+            fc.code as from_currency_code, fc.name as from_currency_name,
+            tc.code as to_currency_code, tc.name as to_currency_name
+            FROM exchange_rates er
+            INNER JOIN currencies fc ON er.from_currency_id = fc.id
+            INNER JOIN currencies tc ON er.to_currency_id = tc.id
+            ORDER BY er.effective_date DESC, fc.code, tc.code";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute();
+        return $stmt->fetchAll();
+    }
+
+/**
+ * Buscar tasa de cambio por monedas y fecha específica
+ * 
+ * @param int $fromCurrencyId
+ * @param int $toCurrencyId
+ * @param string $date
+ * @return array|null
+ */
+public function findByCurrenciesAndDate(int $fromCurrencyId, int $toCurrencyId, string $date): ?array
+{
+    $sql = "SELECT * FROM {$this->table} 
+            WHERE from_currency_id = :from_id 
+            AND to_currency_id = :to_id 
+            AND effective_date = :date";
+    
+    $stmt = $this->db->prepare($sql);
+    $stmt->execute([
+        'from_id' => $fromCurrencyId,
+        'to_id' => $toCurrencyId,
+        'date' => $date
+    ]);
+    
+    $result = $stmt->fetch();
+    return $result ?: null;
+}
 }

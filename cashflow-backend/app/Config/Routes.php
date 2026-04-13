@@ -510,6 +510,13 @@ return [
         'middleware' => ['AuthMiddleware']
     ],
     [
+        'method' => 'GET',
+        'pattern' => '#^api/exchange-rates/all$#',
+        'controller' => 'App\\Controllers\\ExchangeRateController',
+        'action' => 'getAll',
+        'middleware' => ['AuthMiddleware']
+    ],
+    [
         'method' => 'POST',
         'pattern' => '#^api/exchange-rates$#',
         'controller' => 'App\\Controllers\\ExchangeRateController',

@@ -86,15 +86,22 @@ export const transactionService = {
         try {
             const params = new URLSearchParams();
 
+            // Filtros existentes
             if (filters.start_date) params.append('start_date', filters.start_date);
             if (filters.end_date) params.append('end_date', filters.end_date);
             if (filters.account_id) params.append('account_id', filters.account_id);
+
+            // NUEVOS FILTROS
+            if (filters.company_id) params.append('company_id', filters.company_id);
+            if (filters.year) params.append('year', filters.year);
+            if (filters.month) params.append('month', filters.month);
             if (filters.limit) params.append('limit', filters.limit);
 
             const url = `api/expenses${params.toString() ? '?' + params.toString() : ''}`;
-            const response = await api.get(url);
+            console.log('URL de petición:', url); // Para depurar
 
-            console.log('Respuesta de getExpenses:', response); // Para depurar
+            const response = await api.get(url);
+            console.log('Respuesta:', response); // Para depurar
 
             return response;
         } catch (error) {

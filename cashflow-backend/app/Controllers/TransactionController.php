@@ -33,6 +33,21 @@ class TransactionController
         $userId = $this->getUserId();
         $companyId = $this->getCompanyId($userId);
 
+        $userId = $this->getUserId();
+        $userRole = $this->getUserRole($userId);
+
+        if ($userRole === 'super_admin' || $userRole === 'admin') {
+            // super_admin y admin ven ingresos de TODAS las empresas
+            $incomes = $this->incomeModel->getAllGlobal();
+        } else {
+            // user normal solo ve ingresos de su empresa
+            $companyId = $this->getCompanyId($userId);
+            $incomes = $this->incomeModel->getByCompany($companyId);
+        }
+
+        Response::success($incomes);
+
+
         if ($userId <= 0 || $companyId <= 0) {
             Response::unauthorized('Usuario no autenticado');
             return;
@@ -67,6 +82,20 @@ class TransactionController
         $userModel = new \App\Models\User();
         $user = $userModel->find($userId);
         return $user['company_id'] ?? 0;
+    }
+
+    /**
+     * Obtener rol del usuario autenticado
+     */
+    private function getUserRole(int $userId): string
+    {
+        if ($userId <= 0) {
+            return 'guest';
+        }
+
+        $userModel = new \App\Models\User();
+        $user = $userModel->find($userId);
+        return $user['role'] ?? 'user';
     }
 
     /**
@@ -315,28 +344,67 @@ class TransactionController
     public function getExpenses(): void
     {
         $userId = $this->getUserId();
-        $companyId = $this->getCompanyId($userId);
+        $userRole = $this->getUserRole($userId);
 
-        if ($userId <= 0 || $companyId <= 0) {
+        if ($userId <= 0) {
             Response::unauthorized('Usuario no autenticado');
             return;
         }
 
-        $filters = [
-            'start_date' => $_GET['start_date'] ?? null,
-            'end_date' => $_GET['end_date'] ?? null,
-            'account_id' => isset($_GET['account_id']) ? (int) $_GET['account_id'] : null
-        ];
-
+        // Obtener filtros de la request
+        $companyId = isset($_GET['company_id']) ? (int) $_GET['company_id'] : null;
+        $year = $_GET['year'] ?? null;
+        $month = $_GET['month'] ?? null;
+        $accountId = isset($_GET['account_id']) ? (int) $_GET['account_id'] : null;
         $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : null;
 
-        $expenses = $this->expenseModel->getWithAccount($companyId, $filters, $limit);
+        // Construir filtros para el modelo
+        $filters = [];
 
-        // Calcular total
-        $total = array_sum(array_column($expenses, 'amount'));
+        // Convertir año/mes a rango de fechas
+        if ($year && !empty($year)) {
+            if ($month && !empty($month)) {
+                // Mes específico
+                $monthPadded = str_pad($month, 2, '0', STR_PAD_LEFT);
+                $filters['start_date'] = "{$year}-{$monthPadded}-01";
+                $filters['end_date'] = date("Y-m-t", strtotime($filters['start_date']));
+            } else {
+                // Año completo
+                $filters['start_date'] = "{$year}-01-01";
+                $filters['end_date'] = "{$year}-12-31";
+            }
+        }
 
-        // Agregar log para depurar
-        error_log("getExpenses - CompanyId: $companyId, Total encontrados: " . count($expenses));
+        if ($accountId) {
+            $filters['account_id'] = $accountId;
+        }
+
+        // Log para depuración
+        error_log("getExpenses - Role: {$userRole}, CompanyId filter: " . ($companyId ?? 'null'));
+        error_log("getExpenses - Filters: " . json_encode($filters));
+
+        // Obtener egresos según el rol del usuario
+        if ($userRole === 'super_admin') {
+            // Super admin puede ver todas las empresas
+            if ($companyId && $companyId > 0) {
+                // Filtrar por empresa específica
+                $expenses = $this->expenseModel->getByCompanyWithFilters($companyId, $filters, $limit);
+            } else {
+                // Ver todas las empresas (global)
+                $expenses = $this->expenseModel->getGlobalWithFilters($filters, $limit);
+            }
+        } else {
+            // Usuarios normales solo ven su propia empresa
+            $userCompanyId = $this->getCompanyId($userId);
+            if ($userCompanyId <= 0) {
+                Response::error('Usuario no tiene empresa asociada', 400);
+                return;
+            }
+            $expenses = $this->expenseModel->getByCompanyWithFilters($userCompanyId, $filters, $limit);
+        }
+
+        // Calcular total en moneda base
+        $total = array_sum(array_column($expenses, 'amount_base_currency'));
 
         Response::success([
             'expenses' => $expenses,
@@ -346,7 +414,7 @@ class TransactionController
     }
     /**
      * POST /api/expenses
-     * Crear nuevo egreso
+     * Crear nuevo egreso (con soporte para conversión de moneda)
      */
     public function createExpense(): void
     {
@@ -375,13 +443,23 @@ class TransactionController
         $validator->min('amount', 0.01);
         $validator->required('date');
         $validator->date('date', 'Y-m-d');
+        $validator->optional('currency_id');
+        $validator->numeric('currency_id');
+        $validator->optional('payment_method');
+        $validator->in('payment_method', ['cash', 'bank']);
 
         if (!$validator->passes()) {
             Response::validationError($validator->errors());
             return;
         }
 
-        // Verificar que la cuenta existe (catálogo global)
+        // Validar fecha futura
+        if (!$this->validateDateNotFuture($data['date'])) {
+            Response::validationError(['date' => 'No se puede registrar una transacción con fecha futura']);
+            return;
+        }
+
+        // Verificar que la cuenta existe y es de tipo expense
         $accountModel = new \App\Models\Account();
         $account = $accountModel->find((int) $data['account_id']);
 
@@ -390,21 +468,60 @@ class TransactionController
             return;
         }
 
-        // Verificar que la cuenta es del tipo correcto (expense)
         if ($account['type'] !== 'expense') {
             Response::validationError(['account_id' => 'La cuenta seleccionada no es de tipo egreso']);
             return;
         }
+
+        // ========== NUEVO: MANEJO DE MONEDA Y CONVERSIÓN ==========
+
+        $currencyService = new \App\Services\CurrencyService();
+        $baseCurrency = $currencyService->getBaseCurrency();
+
+        // Obtener moneda seleccionada (por defecto la moneda base)
+        $currencyId = isset($data['currency_id']) ? (int) $data['currency_id'] : ($baseCurrency['id'] ?? 9);
+        $amount = (float) $data['amount'];
+        $exchangeRate = 1;
+        $amountBaseCurrency = $amount;
+
+        // Verificar que la moneda existe
+        $currencyModel = new \App\Models\Currency();
+        $currency = $currencyModel->find($currencyId);
+        if (!$currency) {
+            Response::validationError(['currency_id' => 'Moneda no válida']);
+            return;
+        }
+
+        // Si la moneda seleccionada NO es la moneda base, buscar tasa de cambio
+        if ($baseCurrency && $currencyId != $baseCurrency['id']) {
+            $conversion = $currencyService->convert($amount, $currencyId, $baseCurrency['id'], $data['date']);
+
+            if ($conversion['success']) {
+                $exchangeRate = $conversion['rate'];
+                $amountBaseCurrency = $conversion['converted_amount'];
+            } else {
+                Response::validationError([
+                    'currency_id' => "No se encontró tasa de cambio para {$currency['code']} a {$baseCurrency['code']} en la fecha {$data['date']}"
+                ]);
+                return;
+            }
+        }
+
+        // ========== FIN DE LA NUEVA LÓGICA ==========
 
         // Crear egreso
         $expenseData = [
             'company_id' => $companyId,
             'user_id' => $userId,
             'account_id' => (int) $data['account_id'],
-            'amount' => (float) $data['amount'],
+            'amount' => $amount,
+            'currency_id' => $currencyId,
+            'exchange_rate' => $exchangeRate,
+            'amount_base_currency' => $amountBaseCurrency,
             'date' => $data['date'],
             'description' => $data['description'] ?? null,
-            'reference' => $data['reference'] ?? null
+            'reference' => $data['reference'] ?? null,
+            'payment_method' => $data['payment_method'] ?? 'cash'
         ];
 
         $expense = $this->expenseModel->create($expenseData);
@@ -446,15 +563,17 @@ class TransactionController
     /**
      * PUT /api/expenses/{id}
      * Actualizar egreso
+     * - Para super_admin: puede editar cualquier egreso (con restricciones según tipo)
+     * - Para otros roles: solo egresos de su empresa
      */
     public function updateExpense(int $id): void
     {
         $rawInput = file_get_contents('php://input');
         $data = json_decode($rawInput, true);
         $userId = $this->getUserId();
-        $companyId = $this->getCompanyId($userId);
+        $userRole = $this->getUserRole($userId);  // ← Obtener rol
 
-        if ($userId <= 0 || $companyId <= 0) {
+        if ($userId <= 0) {
             Response::unauthorized('Usuario no autenticado');
             return;
         }
@@ -466,24 +585,80 @@ class TransactionController
             return;
         }
 
-        if ($expense['company_id'] != $companyId) {
-            Response::forbidden('No autorizado');
+        // ========== VALIDACIÓN DE PERMISOS ==========
+        // Super_admin puede editar cualquier egreso
+        // Otros roles solo pueden editar egresos de su empresa
+        if ($userRole !== 'super_admin') {
+            $companyId = $this->getCompanyId($userId);
+            if ($expense['company_id'] != $companyId) {
+                Response::forbidden('No tienes permisos para editar este egreso');
+                return;
+            }
+        }
+        // ========== FIN VALIDACIÓN ==========
+
+        // ========== VALIDAR SEGÚN TIPO DE PAGO ==========
+        $isBankExpense = isset($expense['payment_method']) && $expense['payment_method'] === 'bank';
+
+        if ($isBankExpense) {
+            // Egreso bancario: SOLO puede editar 'description'
+            $allowedFields = ['description'];
+            $updateData = [];
+
+            if (isset($data['description'])) {
+                $updateData['description'] = $data['description'];
+            }
+
+            // Validar que solo se esté intentando editar descripción
+            $forbiddenFields = array_diff(array_keys($data), $allowedFields);
+            if (!empty($forbiddenFields)) {
+                Response::forbidden(
+                    'Los egresos bancarios solo permiten editar la descripción. ' .
+                        'Campos no permitidos: ' . implode(', ', $forbiddenFields)
+                );
+                return;
+            }
+
+            if (empty($updateData)) {
+                Response::error('No hay campos válidos para actualizar', 400);
+                return;
+            }
+
+            // Validar descripción
+            $validator = new Validator($updateData);
+            $validator->optional('description');
+            $validator->string('description');
+            $validator->maxLength('description', 500);
+
+            if (!$validator->passes()) {
+                Response::validationError($validator->errors());
+                return;
+            }
+
+            $updated = $this->expenseModel->update($id, $updateData);
+
+            if ($updated) {
+                Response::success($updated, 'Descripción del egreso bancario actualizada exitosamente');
+            } else {
+                Response::error('Error al actualizar la descripción', 500);
+            }
             return;
         }
+
+        // ========== Egreso en efectivo: permite editar todos los campos ==========
 
         $validator = new Validator($data ?? []);
         $validator->optional('account_id');
         $validator->numeric('account_id');
-
         $validator->optional('amount');
         $validator->numeric('amount');
         $validator->min('amount', 0.01);
+        $validator->optional('currency_id');
+        $validator->numeric('currency_id');
 
-        // ✅ Solo validar fecha si existe en la petición
         if (isset($data['date'])) {
             $validator->required('date');
             $validator->date('date', 'Y-m-d');
-
             if (!$this->validateDateNotFuture($data['date'])) {
                 Response::validationError(['date' => 'No se puede establecer una fecha futura']);
                 return;
@@ -493,31 +668,77 @@ class TransactionController
         $validator->optional('description');
         $validator->string('description');
         $validator->maxLength('description', 500);
-
         $validator->optional('reference');
         $validator->string('reference');
         $validator->maxLength('reference', 100);
+        $validator->optional('payment_method');
+        $validator->in('payment_method', ['cash', 'bank']);
 
         if (!$validator->passes()) {
             Response::validationError($validator->errors());
             return;
         }
 
+        // Si se cambia la cuenta, verificar que existe y es del tipo correcto
         if (isset($data['account_id'])) {
             $account = $this->accountModel->find((int) $data['account_id']);
-
             if (!$account) {
                 Response::notFound('Cuenta no encontrada');
                 return;
             }
-
             if ($account['type'] !== 'expense') {
                 Response::validationError(['account_id' => 'La cuenta seleccionada no es de tipo egreso']);
                 return;
             }
         }
 
-        $updated = $this->expenseModel->update($id, $data);
+        // Preparar datos para actualizar
+        $updateData = [];
+
+        // Copiar campos simples
+        $simpleFields = ['account_id', 'description', 'reference', 'payment_method'];
+        foreach ($simpleFields as $field) {
+            if (isset($data[$field])) {
+                $updateData[$field] = $data[$field];
+            }
+        }
+
+        // Manejar monto, moneda y fecha con recalculo de conversión
+        $needConversion = false;
+        $newAmount = isset($data['amount']) ? (float) $data['amount'] : $expense['amount'];
+        $newCurrencyId = isset($data['currency_id']) ? (int) $data['currency_id'] : $expense['currency_id'];
+        $newDate = isset($data['date']) ? $data['date'] : $expense['date'];
+
+        if (isset($data['amount']) || isset($data['currency_id']) || isset($data['date'])) {
+            $needConversion = true;
+            $updateData['amount'] = $newAmount;
+            $updateData['currency_id'] = $newCurrencyId;
+            $updateData['date'] = $newDate;
+        }
+
+        if ($needConversion) {
+            $currencyService = new \App\Services\CurrencyService();
+            $baseCurrency = $currencyService->getBaseCurrency();
+
+            if ($baseCurrency && $newCurrencyId != $baseCurrency['id']) {
+                $conversion = $currencyService->convert($newAmount, $newCurrencyId, $baseCurrency['id'], $newDate);
+
+                if ($conversion['success']) {
+                    $updateData['exchange_rate'] = $conversion['rate'];
+                    $updateData['amount_base_currency'] = $conversion['converted_amount'];
+                } else {
+                    Response::validationError([
+                        'currency_id' => "No se encontró tasa de cambio para la fecha {$newDate}"
+                    ]);
+                    return;
+                }
+            } else {
+                $updateData['exchange_rate'] = 1;
+                $updateData['amount_base_currency'] = $newAmount;
+            }
+        }
+
+        $updated = $this->expenseModel->update($id, $updateData);
 
         if ($updated) {
             Response::success($updated, 'Egreso actualizado exitosamente');
@@ -525,7 +746,6 @@ class TransactionController
             Response::error('Error al actualizar el egreso', 500);
         }
     }
-
     /**
      * DELETE /api/expenses/{id}
      * Eliminar egreso
@@ -533,6 +753,7 @@ class TransactionController
     public function deleteExpense(int $id): void
     {
         $userId = $this->getUserId();
+        $userRole = $this->getUserRole($userId);  // ← Obtener rol
 
         $expense = $this->expenseModel->find($id);
 
@@ -541,10 +762,16 @@ class TransactionController
             return;
         }
 
-        if ($expense['user_id'] != $userId) {
-            Response::forbidden('No autorizado');
-            return;
+        // ========== VALIDACIÓN DE PERMISOS ==========
+        // Super_admin puede eliminar cualquier egreso
+        if ($userRole !== 'super_admin') {
+            // Verificar que el egreso pertenece al usuario
+            if ($expense['user_id'] != $userId) {
+                Response::forbidden('No autorizado para eliminar este egreso');
+                return;
+            }
         }
+        // ========== FIN VALIDACIÓN ==========
 
         if ($this->expenseModel->delete($id)) {
             Response::success(null, 'Egreso eliminado exitosamente');

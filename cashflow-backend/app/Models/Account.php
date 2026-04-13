@@ -144,4 +144,25 @@ class Account extends BaseModel
         $result = $stmt->fetch();
         return (int) ($result['total'] ?? 0);
     }
+
+    /**
+     * Obtener cuentas por empresa
+     */
+    public function getByCompany(int $companyId, ?string $type = null): array
+    {
+        $sql = "SELECT * FROM {$this->table} WHERE company_id = :company_id";
+        $params = ['company_id' => $companyId];
+
+        if ($type) {
+            $sql .= " AND type = :type";
+            $params['type'] = $type;
+        }
+
+        $sql .= " ORDER BY name ASC";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll();
+    }
 }

@@ -233,6 +233,9 @@ class CurrencyController
         $userId = $this->getUserId();
         $userRole = $this->getUserRole($userId);
 
+        error_log("=== DESTROY CURRENCY ===");
+        error_log("User ID: $userId, Role: $userRole, Currency ID: $id");
+
         if ($userRole !== 'super_admin') {
             Response::forbidden('No tienes permisos para eliminar monedas');
             return;
@@ -250,6 +253,20 @@ class CurrencyController
             Response::forbidden('No se puede eliminar la moneda base del sistema');
             return;
         }
+
+        // ✅ Verificar tasas de cambio usando el método del modelo
+        $exchangeRateModel = new \App\Models\ExchangeRate();
+        $ratesCount = $exchangeRateModel->countByCurrency($id);
+
+        if ($ratesCount > 0) {
+            Response::error(
+                "No se puede eliminar la moneda porque está siendo utilizada en {$ratesCount} tasa(s) de cambio. " .
+                    "Primero debe eliminar las tasas de cambio asociadas.",
+                400
+            );
+            return;
+        }
+
 
         // ✅ Usar los métodos de los modelos
         $incomeModel = new \App\Models\Income();
