@@ -364,4 +364,55 @@ class AuthController
 
         return $this->jwtService->generate($payload);
     }
+
+    /**
+     * GET /api/auth/check
+     * Verificar autenticación (método de prueba)
+     */
+    public function checkAuth(): void
+    {
+        // Obtener datos desde las variables que AuthMiddleware debería haber seteado
+        $userId = $_REQUEST['user_id'] ?? 0;
+        $companyId = $_REQUEST['company_id'] ?? 0;
+        $userRole = $_REQUEST['user_role'] ?? 'guest';
+
+        // También intentar desde el token si es necesario
+        if ($userId == 0) {
+            $payload = $this->getTokenPayload();
+            if ($payload) {
+                $userId = $payload['user_id'] ?? 0;
+                $companyId = $payload['company_id'] ?? 0;
+                $userRole = $payload['role'] ?? 'guest';
+            }
+        }
+
+        Response::success([
+            'authenticated' => $userId > 0,
+            'user_id' => $userId,
+            'company_id' => $companyId,
+            'role' => $userRole,
+            'message' => $userId > 0 ? 'Usuario autenticado' : 'Usuario no autenticado'
+        ]);
+    }
+
+    /**
+     * Obtener payload del token desde el header Authorization
+     */
+    private function getTokenPayload(): ?array
+    {
+        $headers = getallheaders();
+        $authHeader = $headers['Authorization'] ?? '';
+
+        if (preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
+            try {
+                $jwtService = new \App\Services\JWTService();
+                return $jwtService->validate($matches[1]);
+            } catch (\Exception $e) {
+                error_log("Error validating token: " . $e->getMessage());
+                return null;
+            }
+        }
+
+        return null;
+    }
 }

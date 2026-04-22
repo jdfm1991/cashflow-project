@@ -87,6 +87,14 @@ return [
         'action' => 'changePassword',
         'middleware' => ['AuthMiddleware']
     ],
+    // Agrega esto en tus rutas para probar
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/auth/check$#',
+        'controller' => 'App\\Controllers\\AuthController',
+        'action' => 'checkAuth',
+        'middleware' => ['AuthMiddleware']
+    ],
 
     // ============================================
     // RUTAS DE EMPRESAS (NUEVAS)
@@ -192,6 +200,15 @@ return [
         'pattern' => '#^api/public/dashboard/category-distribution$#',
         'controller' => 'App\\Controllers\\DashboardController',
         'action' => 'getPublicCategoryDistribution',
+        'middleware' => []
+    ],
+
+    // ✅ NUEVA RUTA: Flujo de caja público
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/public/dashboard/cashflow$#',
+        'controller' => 'App\\Controllers\\DashboardController',
+        'action' => 'getPublicCashFlow',
         'middleware' => []
     ],
 
@@ -544,8 +561,6 @@ return [
         'action' => 'destroy',
         'middleware' => ['AuthMiddleware']
     ],
-
-    // app/Config/Routes.php - Agregar estas rutas
 
     // ============================================
     // RUTAS DE CARGA MASIVA (CONCILIACIÓN)

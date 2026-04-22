@@ -10,11 +10,10 @@ use App\Models\ImportedTransaction;
 use App\Models\Income;
 use App\Models\Expense;
 use App\Models\Account;
-//use App\Services\BankStatementParser;
+use App\Services\BankStatementParser;
 use App\Services\CurrencyService;
 use App\Helpers\Response;
 use App\Helpers\Validator;
-use App\Services\BankParserFactory;
 
 class UploadController
 {
@@ -24,12 +23,10 @@ class UploadController
     private Income $incomeModel;
     private Expense $expenseModel;
     private Account $accountModel;
-    //private BankStatementParser $parser;
-    private BankParserFactory $parserFactory;
+    private BankStatementParser $parser;
     private CurrencyService $currencyService;
 
     private string $uploadDir;
-
 
     public function __construct()
     {
@@ -39,11 +36,8 @@ class UploadController
         $this->incomeModel = new Income();
         $this->expenseModel = new Expense();
         $this->accountModel = new Account();
+        $this->parser = new BankStatementParser();
         $this->currencyService = new CurrencyService();
-
-        // ✅ Usar la nueva fábrica de parsers
-        $this->parserFactory = new \App\Services\BankParserFactory();
-
         $this->uploadDir = BANK_STATEMENTS_PATH . '/';
 
         if (!is_dir($this->uploadDir)) {
@@ -59,15 +53,6 @@ class UploadController
     {
         $companyId = $this->getCompanyId();
         $userId = $this->getUserId();
-
-        error_log("=== UPLOAD BANK STATEMENT ===");
-        error_log("Company ID: " . $companyId);
-        error_log("User ID: " . $userId);
-
-        if ($companyId <= 0) {
-            Response::unauthorized('No se pudo identificar la empresa');
-            return;
-        }
 
         if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
             Response::error('No se recibió ningún archivo', 400);
@@ -105,19 +90,9 @@ class UploadController
             return;
         }
 
-        // Parsear archivo según el banco
-        //$parseResult = $this->parser->parse($bankId, $tempPath);
-        // ✅ OBTENER EL PARSER CORRECTO PARA EL BANCO
-        $parser = $this->parserFactory->getParser($bankId);
-        
-        error_log("=== DEBUG PARSER ===");
-        error_log("Bank ID: " . $bankId);
-        error_log("Parser existe: " . ($parser ? 'SI' : 'NO'));
-
-        if ($parser) {
-            $config = $parser->getConfig();
-            error_log("Configuración del banco: " . json_encode($config));
-        }
+        // ✅ Usar el ParserFactory para obtener el parser adecuado
+        $parserFactory = new \App\Services\BankParserFactory();
+        $parser = $parserFactory->getParser($bankId);
 
         if (!$parser) {
             unlink($tempPath);
@@ -125,9 +100,7 @@ class UploadController
             return;
         }
 
-        error_log("Usando parser para banco ID: {$bankId}, Nombre: " . $parser->getConfig()['name']);
-
-        // ✅ VALIDAR FORMATO
+        // Validar formato
         if (!$parser->validateFormat($tempPath)) {
             unlink($tempPath);
             Response::error(
@@ -138,14 +111,8 @@ class UploadController
             return;
         }
 
-        // ✅ PARSEAR EL ARCHIVO
+        // Parsear archivo
         $parseResult = $parser->parse($tempPath);
-
-        // Log para depuración
-        error_log("Parse result - Success: " . ($parseResult['success'] ? 'true' : 'false'));
-        error_log("Parse result - Total rows: " . $parseResult['total_rows']);
-        error_log("Parse result - Errors: " . print_r($parseResult['errors'], true));
-        error_log("Parse result - First 3 records: " . print_r(array_slice($parseResult['data'], 0, 3), true));
 
         if (!$parseResult['success']) {
             unlink($tempPath);
@@ -153,9 +120,7 @@ class UploadController
             return;
         }
 
-        error_log("Transacciones parseadas: " . count($parseResult['data']));
-
-        // ✅ Guardar TODAS las transacciones en tabla temporal (no solo 10)
+        // Guardar todas las transacciones en tabla temporal
         $sessionId = uniqid('session_');
         $savedCount = 0;
 
@@ -180,7 +145,7 @@ class UploadController
         // Limpiar archivo temporal
         unlink($tempPath);
 
-        // ✅ Obtener TODAS las transacciones guardadas para previsualización
+        // Obtener todas las transacciones guardadas
         $allTransactions = $this->importedModel->getBySession($companyId, $sessionId);
         $previewData = [];
         $previewIds = [];
@@ -193,21 +158,24 @@ class UploadController
                 'amount' => (float) $transaction['amount'],
                 'transaction_type' => $transaction['transaction_type']
             ];
-            $previewIds[] = $transaction['id']; // ✅ Enviar el ID real
+            $previewIds[] = $transaction['id'];
         }
 
-        // Obtener las cuentas del catálogo para el mapeo
+        // Obtener cuentas para mapeo
         $incomeAccounts = $this->accountModel->getGlobalAccounts('income');
         $expenseAccounts = $this->accountModel->getGlobalAccounts('expense');
 
-        // ✅ Enviar el ID de la sesión
         Response::success([
             'session_id' => $sessionId,
             'total_transactions' => $savedCount,
             'preview' => $previewData,
-            'preview_ids' => $previewIds, // ✅ IDs reales
+            'preview_ids' => $previewIds,
             'income_accounts' => $incomeAccounts,
-            'expense_accounts' => $expenseAccounts
+            'expense_accounts' => $expenseAccounts,
+            'bank_info' => [
+                'id' => $bankId,
+                'name' => $parser->getConfig()['name']
+            ]
         ], 'Archivo procesado correctamente. Por favor mapee las transacciones.');
     }
 
@@ -348,19 +316,7 @@ class UploadController
      */
     public function getBanks(): void
     {
-        // Obtener bancos de la base de datos
         $banks = $this->bankModel->getActiveBanks();
-
-        // Agregar información de configuración si está disponible
-        $parserFactory = new \App\Services\BankParserFactory();
-        $supportedBanks = $parserFactory->getSupportedBanks();
-
-        // Mapear información adicional
-        foreach ($banks as &$bank) {
-            $bank['has_parser'] = isset($supportedBanks[$bank['id']]);
-            $bank['parser_info'] = $supportedBanks[$bank['id']] ?? null;
-        }
-
         Response::success($banks);
     }
 
@@ -412,55 +368,7 @@ class UploadController
         return null;
     }
 
-    /**
-     * Obtener company_id de la empresa autenticada
-     * Versión simplificada que solo lee lo que AuthMiddleware setea
-     */
     private function getCompanyId(): int
-    {
-        // AuthMiddleware debería haber seteado esto
-        if (isset($_REQUEST['company_id']) && !empty($_REQUEST['company_id'])) {
-            return (int) $_REQUEST['company_id'];
-        }
-
-        // Fallback: intentar obtener del token
-        $payload = $this->getTokenPayload();
-        if ($payload && isset($payload['company_id'])) {
-            return (int) $payload['company_id'];
-        }
-
-        // Último recurso: buscar desde el usuario
-        $userId = $this->getUserId();
-        if ($userId > 0) {
-            return $this->getCompanyIdFromUser($userId);
-        }
-
-        return 0;
-    }
-
-    /**
-     * Obtener ID de usuario autenticado
-     */
-    private function getUserId(): int
-    {
-        // AuthMiddleware debería haber seteado esto
-        if (isset($_REQUEST['user_id']) && !empty($_REQUEST['user_id'])) {
-            return (int) $_REQUEST['user_id'];
-        }
-
-        // Fallback: intentar obtener del token
-        $payload = $this->getTokenPayload();
-        if ($payload && isset($payload['user_id'])) {
-            return (int) $payload['user_id'];
-        }
-
-        return 0;
-    }
-
-    /**
-     * Obtener payload del token desde el header Authorization
-     */
-    private function getTokenPayload(): ?array
     {
         $headers = getallheaders();
         $authHeader = $headers['Authorization'] ?? '';
@@ -468,16 +376,22 @@ class UploadController
         if (preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
             try {
                 $jwtService = new \App\Services\JWTService();
-                return $jwtService->validate($matches[1]);
+                $payload = $jwtService->validate($matches[1]);
+                if ($payload && isset($payload['company_id'])) {
+                    return (int) $payload['company_id'];
+                }
             } catch (\Exception $e) {
-                error_log("UploadController: Error al validar token: " . $e->getMessage());
-                return null;
+                // Error al validar token
             }
         }
 
-        return null;
+        return $_REQUEST['company_id'] ?? 0;
     }
 
+    private function getUserId(): int
+    {
+        return $_REQUEST['user_id'] ?? 0;
+    }
 
     /**
      * Verificar si una transacción ya existe en la base de datos
@@ -540,24 +454,5 @@ class UploadController
         $result = $stmt->fetch();
 
         return ($result['total'] ?? 0) > 0;
-    }
-
-    /**
-     * Obtener company_id a partir del user_id
-     */
-    private function getCompanyIdFromUser(int $userId): int
-    {
-        if ($userId <= 0) {
-            return 0;
-        }
-
-        try {
-            $userModel = new \App\Models\User();
-            $user = $userModel->find($userId);
-            return (int) ($user['company_id'] ?? 0);
-        } catch (\Exception $e) {
-            error_log("UploadController: Error al obtener company_id del usuario: " . $e->getMessage());
-            return 0;
-        }
     }
 }

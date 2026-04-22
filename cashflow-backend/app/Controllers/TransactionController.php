@@ -25,45 +25,72 @@ class TransactionController
 
     /**
      * GET /api/incomes
-     * Obtener ingresos del usuario
+     * Obtener ingresos con filtros avanzados
      */
-
     public function getIncomes(): void
     {
         $userId = $this->getUserId();
-        $companyId = $this->getCompanyId($userId);
-
-        $userId = $this->getUserId();
         $userRole = $this->getUserRole($userId);
 
-        if ($userRole === 'super_admin' || $userRole === 'admin') {
-            // super_admin y admin ven ingresos de TODAS las empresas
-            $incomes = $this->incomeModel->getAllGlobal();
-        } else {
-            // user normal solo ve ingresos de su empresa
-            $companyId = $this->getCompanyId($userId);
-            $incomes = $this->incomeModel->getByCompany($companyId);
-        }
-
-        Response::success($incomes);
-
-
-        if ($userId <= 0 || $companyId <= 0) {
+        if ($userId <= 0) {
             Response::unauthorized('Usuario no autenticado');
             return;
         }
 
-        $filters = [
-            'start_date' => $_GET['start_date'] ?? null,
-            'end_date' => $_GET['end_date'] ?? null,
-            'account_id' => isset($_GET['account_id']) ? (int) $_GET['account_id'] : null
-        ];
-
+        // Obtener filtros de la request
+        $companyId = isset($_GET['company_id']) ? (int) $_GET['company_id'] : null;
+        $year = $_GET['year'] ?? null;
+        $month = $_GET['month'] ?? null;
+        $accountId = isset($_GET['account_id']) ? (int) $_GET['account_id'] : null;
         $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : null;
 
-        $incomes = $this->incomeModel->getWithAccount($companyId, $filters, $limit);
+        // Construir filtros para el modelo
+        $filters = [];
 
-        $total = array_sum(array_column($incomes, 'amount'));
+        // Convertir año/mes a rango de fechas
+        if ($year && !empty($year)) {
+            if ($month && !empty($month)) {
+                // Mes específico
+                $monthPadded = str_pad($month, 2, '0', STR_PAD_LEFT);
+                $filters['start_date'] = "{$year}-{$monthPadded}-01";
+                $filters['end_date'] = date("Y-m-t", strtotime($filters['start_date']));
+            } else {
+                // Año completo
+                $filters['start_date'] = "{$year}-01-01";
+                $filters['end_date'] = "{$year}-12-31";
+            }
+        }
+
+        if ($accountId) {
+            $filters['account_id'] = $accountId;
+        }
+
+        // Log para depuración
+        error_log("getIncomes - Role: {$userRole}, CompanyId filter: " . ($companyId ?? 'null'));
+        error_log("getIncomes - Filters: " . json_encode($filters));
+
+        // Obtener ingresos según el rol del usuario
+        if ($userRole === 'super_admin') {
+            // Super admin puede ver todas las empresas
+            if ($companyId && $companyId > 0) {
+                // Filtrar por empresa específica
+                $incomes = $this->incomeModel->getByCompanyWithFilters($companyId, $filters, $limit);
+            } else {
+                // Ver todas las empresas (global)
+                $incomes = $this->incomeModel->getGlobalWithFilters($filters, $limit);
+            }
+        } else {
+            // Usuarios normales solo ven su propia empresa
+            $userCompanyId = $this->getCompanyId($userId);
+            if ($userCompanyId <= 0) {
+                Response::error('Usuario no tiene empresa asociada', 400);
+                return;
+            }
+            $incomes = $this->incomeModel->getByCompanyWithFilters($userCompanyId, $filters, $limit);
+        }
+
+        // Calcular total en moneda base
+        $total = array_sum(array_column($incomes, 'amount_base_currency'));
 
         Response::success([
             'incomes' => $incomes,
@@ -100,7 +127,7 @@ class TransactionController
 
     /**
      * POST /api/incomes
-     * Crear nuevo ingreso
+     * Crear nuevo ingreso (con soporte para conversión de moneda)
      */
     public function createIncome(): void
     {
@@ -120,6 +147,7 @@ class TransactionController
             return;
         }
 
+        // Validaciones
         $validator = new Validator($data);
         $validator->required('account_id');
         $validator->numeric('account_id');
@@ -128,7 +156,7 @@ class TransactionController
         $validator->min('amount', 0.01);
         $validator->required('date');
         $validator->date('date', 'Y-m-d');
-        $validator->required('currency_id');
+        $validator->optional('currency_id');
         $validator->numeric('currency_id');
         $validator->required('payment_method');
         $validator->in('payment_method', ['cash', 'bank']);
@@ -151,35 +179,48 @@ class TransactionController
             return;
         }
 
-        // Verificar moneda
+        // ========== NUEVO: MANEJO DE MONEDA Y CONVERSIÓN ==========
+
+        $currencyService = new \App\Services\CurrencyService();
+        $baseCurrency = $currencyService->getBaseCurrency();
+
+        // Obtener moneda seleccionada (por defecto la moneda base)
+        $currencyId = isset($data['currency_id']) ? (int) $data['currency_id'] : ($baseCurrency['id'] ?? 9);
+        $amount = (float) $data['amount'];
+        $exchangeRate = 1;
+        $amountBaseCurrency = $amount;
+
+        // Verificar que la moneda existe
         $currencyModel = new \App\Models\Currency();
-        $currency = $currencyModel->find((int) $data['currency_id']);
+        $currency = $currencyModel->find($currencyId);
         if (!$currency) {
             Response::validationError(['currency_id' => 'Moneda no válida']);
             return;
         }
 
-        // Obtener tasa de cambio
-        $exchangeRate = 1;
-        $amountBaseCurrency = $data['amount'];
+        // Si la moneda seleccionada NO es la moneda base, buscar tasa de cambio
+        if ($baseCurrency && $currencyId != $baseCurrency['id']) {
+            $conversion = $currencyService->convert($amount, $currencyId, $baseCurrency['id'], $data['date']);
 
-        $currencyService = new \App\Services\CurrencyService();
-        $baseCurrency = $currencyService->getBaseCurrency();
-
-        if ($baseCurrency && $data['currency_id'] != $baseCurrency['id']) {
-            $conversion = $currencyService->convert($data['amount'], $data['currency_id'], $baseCurrency['id'], $data['date']);
             if ($conversion['success']) {
                 $exchangeRate = $conversion['rate'];
                 $amountBaseCurrency = $conversion['converted_amount'];
+            } else {
+                Response::validationError([
+                    'currency_id' => "No se encontró tasa de cambio para {$currency['code']} a {$baseCurrency['code']} en la fecha {$data['date']}"
+                ]);
+                return;
             }
         }
+
+        // ========== FIN DE LA NUEVA LÓGICA ==========
 
         $incomeData = [
             'company_id' => $companyId,
             'user_id' => $userId,
             'account_id' => (int) $data['account_id'],
-            'amount' => (float) $data['amount'],
-            'currency_id' => (int) $data['currency_id'],
+            'amount' => $amount,
+            'currency_id' => $currencyId,
             'exchange_rate' => $exchangeRate,
             'amount_base_currency' => $amountBaseCurrency,
             'date' => $data['date'],
@@ -227,16 +268,17 @@ class TransactionController
 
     /**
      * PUT /api/incomes/{id}
-     * Actualizar ingreso
+     * Actualizar ingreso (con soporte para conversión de moneda)
      */
     public function updateIncome(int $id): void
     {
         $rawInput = file_get_contents('php://input');
         $data = json_decode($rawInput, true);
         $userId = $this->getUserId();
+        $userRole = $this->getUserRole($userId);
         $companyId = $this->getCompanyId($userId);
 
-        if ($userId <= 0 || $companyId <= 0) {
+        if ($userId <= 0) {
             Response::unauthorized('Usuario no autenticado');
             return;
         }
@@ -248,25 +290,28 @@ class TransactionController
             return;
         }
 
-        if ($income['company_id'] != $companyId) {
-            Response::forbidden('No autorizado');
-            return;
+        // ========== VALIDACIÓN DE PERMISOS ==========
+        // Super_admin puede editar cualquier ingreso
+        if ($userRole !== 'super_admin') {
+            if ($income['company_id'] != $companyId) {
+                Response::forbidden('No tienes permisos para editar este ingreso');
+                return;
+            }
         }
+        // ========== FIN VALIDACIÓN ==========
 
         $validator = new Validator($data ?? []);
         $validator->optional('account_id');
         $validator->numeric('account_id');
-
         $validator->optional('amount');
         $validator->numeric('amount');
         $validator->min('amount', 0.01);
+        $validator->optional('currency_id');
+        $validator->numeric('currency_id');
 
-        // ✅ Solo validar fecha si existe en la petición
         if (isset($data['date'])) {
             $validator->required('date');
             $validator->date('date', 'Y-m-d');
-
-            // ✅ Validar que no sea fecha futura
             if (!$this->validateDateNotFuture($data['date'])) {
                 Response::validationError(['date' => 'No se puede establecer una fecha futura']);
                 return;
@@ -276,10 +321,11 @@ class TransactionController
         $validator->optional('description');
         $validator->string('description');
         $validator->maxLength('description', 500);
-
         $validator->optional('reference');
         $validator->string('reference');
         $validator->maxLength('reference', 100);
+        $validator->optional('payment_method');
+        $validator->in('payment_method', ['cash', 'bank']);
 
         if (!$validator->passes()) {
             Response::validationError($validator->errors());
@@ -289,19 +335,63 @@ class TransactionController
         // Si se cambia la cuenta, verificar que existe y es del tipo correcto
         if (isset($data['account_id'])) {
             $account = $this->accountModel->find((int) $data['account_id']);
-
             if (!$account) {
                 Response::notFound('Cuenta no encontrada');
                 return;
             }
-
             if ($account['type'] !== 'income') {
                 Response::validationError(['account_id' => 'La cuenta seleccionada no es de tipo ingreso']);
                 return;
             }
         }
 
-        $updated = $this->incomeModel->update($id, $data);
+        // Preparar datos para actualizar
+        $updateData = [];
+
+        // Copiar campos simples
+        $simpleFields = ['account_id', 'description', 'reference', 'payment_method'];
+        foreach ($simpleFields as $field) {
+            if (isset($data[$field])) {
+                $updateData[$field] = $data[$field];
+            }
+        }
+
+        // Manejar monto, moneda y fecha con recalculo de conversión
+        $needConversion = false;
+        $newAmount = isset($data['amount']) ? (float) $data['amount'] : $income['amount'];
+        $newCurrencyId = isset($data['currency_id']) ? (int) $data['currency_id'] : $income['currency_id'];
+        $newDate = isset($data['date']) ? $data['date'] : $income['date'];
+
+        if (isset($data['amount']) || isset($data['currency_id']) || isset($data['date'])) {
+            $needConversion = true;
+            $updateData['amount'] = $newAmount;
+            $updateData['currency_id'] = $newCurrencyId;
+            $updateData['date'] = $newDate;
+        }
+
+        if ($needConversion) {
+            $currencyService = new \App\Services\CurrencyService();
+            $baseCurrency = $currencyService->getBaseCurrency();
+
+            if ($baseCurrency && $newCurrencyId != $baseCurrency['id']) {
+                $conversion = $currencyService->convert($newAmount, $newCurrencyId, $baseCurrency['id'], $newDate);
+
+                if ($conversion['success']) {
+                    $updateData['exchange_rate'] = $conversion['rate'];
+                    $updateData['amount_base_currency'] = $conversion['converted_amount'];
+                } else {
+                    Response::validationError([
+                        'currency_id' => "No se encontró tasa de cambio para la fecha {$newDate}"
+                    ]);
+                    return;
+                }
+            } else {
+                $updateData['exchange_rate'] = 1;
+                $updateData['amount_base_currency'] = $newAmount;
+            }
+        }
+
+        $updated = $this->incomeModel->update($id, $updateData);
 
         if ($updated) {
             Response::success($updated, 'Ingreso actualizado exitosamente');
@@ -317,6 +407,7 @@ class TransactionController
     public function deleteIncome(int $id): void
     {
         $userId = $this->getUserId();
+        $userRole = $this->getUserRole($userId);
 
         $income = $this->incomeModel->find($id);
 
@@ -325,10 +416,15 @@ class TransactionController
             return;
         }
 
-        if ($income['user_id'] != $userId) {
-            Response::forbidden('No autorizado');
-            return;
+        // ========== VALIDACIÓN DE PERMISOS ==========
+        // Super_admin puede eliminar cualquier ingreso
+        if ($userRole !== 'super_admin') {
+            if ($income['user_id'] != $userId) {
+                Response::forbidden('No autorizado para eliminar este ingreso');
+                return;
+            }
         }
+        // ========== FIN VALIDACIÓN ==========
 
         if ($this->incomeModel->delete($id)) {
             Response::success(null, 'Ingreso eliminado exitosamente');

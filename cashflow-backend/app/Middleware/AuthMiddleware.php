@@ -49,27 +49,34 @@ class AuthMiddleware
                 return false;
             }
             
-            // ✅ GUARDAR USER_ID EN MÚLTIPLES UBICACIONES
-            // 1. En $_REQUEST para que los controladores lo usen
-            $_REQUEST['user_id'] = (int) $payload['user_id'];
+            // ✅ GUARDAR USER_ID
+            $userId = (int) $payload['user_id'];
+            $_REQUEST['user_id'] = $userId;
+            $_POST['user_id'] = $userId;
+            $_GET['user_id'] = $userId;
+            $_SERVER['USER_ID'] = $userId;
+            $GLOBALS['current_user_id'] = $userId;
             
-            // 2. En $_POST (para métodos POST)
-            $_POST['user_id'] = (int) $payload['user_id'];
+            // ✅ NUEVO: GUARDAR COMPANY_ID
+            $companyId = (int) ($payload['company_id'] ?? 0);
+            if ($companyId > 0) {
+                $_REQUEST['company_id'] = $companyId;
+                $_POST['company_id'] = $companyId;
+                $_GET['company_id'] = $companyId;
+                $_SERVER['COMPANY_ID'] = $companyId;
+                $GLOBALS['current_company_id'] = $companyId;
+            }
             
-            // 3. En $_GET (para métodos GET)
-            $_GET['user_id'] = (int) $payload['user_id'];
-            
-            // 4. En $_SERVER para respaldo
-            $_SERVER['USER_ID'] = (int) $payload['user_id'];
-            
-            // 5. En una variable global (último recurso)
-            $GLOBALS['current_user_id'] = (int) $payload['user_id'];
+            // ✅ NUEVO: GUARDAR ROL
+            $userRole = $payload['role'] ?? 'user';
+            $_REQUEST['user_role'] = $userRole;
+            $_SERVER['USER_ROLE'] = $userRole;
             
             // Guardar datos completos del usuario
             $_REQUEST['user_data'] = $payload;
             
             // Log para debugging
-            error_log("AuthMiddleware: Usuario autenticado ID: " . $payload['user_id']);
+            error_log("AuthMiddleware: Usuario autenticado ID: {$userId}, Company ID: {$companyId}, Role: {$userRole}");
             
             return true;
             

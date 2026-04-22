@@ -1,0 +1,193 @@
+{
+  "banks": {
+    "1": {
+      "name": "Banco Provincial",
+      "code": "provincial",
+      "patterns": {
+        "header_row_index": 1,
+        "start_row": 3,
+        "skip_rows_with_keywords": [
+          "SALDO ANTERIOR",
+          "SALDO ACTUAL",
+          "SALDO FINAL"
+        ],
+        "columns": {
+          "date": "A",
+          "reference": "B",
+          "description": "C",
+          "debit": "E",
+          "credit": "F"
+        },
+        "separate_columns": true,
+        "debit_column": "E",
+        "credit_column": "F",
+        "date_formats": [
+          "dd-mm-yyyy",
+          "dd/mm/yyyy",
+          "excel_serial"
+        ]
+      }
+    },
+    "2": {
+      "name": "Banco Mercantil",
+      "code": "mercantil",
+      "patterns": {
+        "header_row_keywords": [
+          "Fecha",
+          "Referencia",
+          "Descripción"
+        ],
+        "start_row_offset": 2,
+        "skip_rows_with_keywords": [
+          "Nombre empresa:",
+          "Nro. Cuenta:",
+          "Monto total:",
+          "Movimientos del mes:",
+          "Número de transacciones:"
+        ],
+        "columns": {
+          "date": "A",
+          "reference": "B",
+          "description": "C",
+          "debit": "D",
+          "credit": "E"
+        },
+        "separate_columns": true,
+        "debit_column": "D",
+        "credit_column": "E",
+        "debit_negative": true,
+        "credit_positive": true,
+        "date_formats": [
+          "dd/mm/yyyy",
+          "excel_serial"
+        ]
+      }
+    },
+    "3": {
+      "name": "Banco de Venezuela",
+      "code": "bdv",
+      "patterns": {
+        "header_row_index": 1,
+        "start_row": 2,
+        "skip_rows_with_keywords": [
+          "SALDO INICIAL",
+          "SALDO ANTERIOR"
+        ],
+        "columns": {
+          "date": "A",
+          "reference": "B",
+          "description": "C",
+          "amount": "E",
+          "movement_type": "F",
+          "balance": "D"
+        },
+        "credit_keywords": [
+          "Nota de Crédito",
+          "Crédito",
+          "Abono",
+          "Ingreso"
+        ],
+        "debit_keywords": [
+          "Nota de Débito",
+          "Débito",
+          "Cargo",
+          "Egreso"
+        ],
+        "amount_negative_in_column": true,
+        "amount_format": "venezuelan",
+        "date_formats": [
+          "dd/mm/yyyy",
+          "excel_serial"
+        ]
+      }
+    },
+    "4": {
+      "name": "Banco Banesco",
+      "code": "banesco",
+      "patterns": {
+        "header_row_index": 1,
+        "start_row": 2,
+        "skip_rows_with_keywords": [],
+        "columns": {
+          "date": "A",
+          "reference": "B",
+          "description": "C",
+          "amount": "D",
+          "balance": "E",
+          "movement_type": "F"
+        },
+        "credit_keywords": [
+          "Nota de Crédito",
+          "Crédito",
+          "Abono",
+          "Pago Recibido"
+        ],
+        "debit_keywords": [
+          "Nota de Débito",
+          "Débito",
+          "Cargo",
+          "Pago Realizado",
+          "compra",
+          "COMPRA",
+          "COMPRA POS"
+        ],
+        "date_formats": [
+          "dd/mm/yyyy",
+          "d de m de yyyy",
+          "excel_serial"
+        ]
+      }
+    },
+    "5": {
+      "name": "Banplus  Banco Universal",
+      "code": "banplus",
+      "patterns": {
+        "header_row_index": 1,
+        "start_row": 3,
+        "skip_rows_with_keywords": [
+          "SALDO ANTERIOR",
+          "SALDO ACTUAL",
+          "SALDO FINAL"
+        ],
+        "columns": {
+          "date": "A",
+          "reference": "B",
+          "description": "C",
+          "debit": "D",
+          "credit": "E"
+        },
+        "separate_columns": true,
+        "debit_column": "D",
+        "credit_column": "E",
+        "date_formats": [
+          "dd-mm-yyyy",
+          "dd/mm/yyyy",
+          "excel_serial"
+        ]
+      }
+    },
+    "6": {
+      "name": "Banco Caroní, C.A. Banco Universal",
+      "code": "caroni",
+      "patterns": {
+        "amount_format": "venezuelan",
+        "date_formats": [
+          "dd/mm/yy",
+          "dd/mm/yyyy"
+        ]
+      }
+    },
+    "7": {
+      "name": "Banco Exterior",
+      "code": "exterior",
+      "patterns": {
+        "date_formats": [
+          "d/m/yy",
+          "dd/mm/yy",
+          "d/m/yyyy",
+          "dd/mm/yyyy"
+        ]
+      }
+    }
+  }
+}

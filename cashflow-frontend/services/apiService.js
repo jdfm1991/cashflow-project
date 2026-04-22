@@ -1,4 +1,4 @@
-const API_BASE_URL = window.location.hostname === 'localhost' 
+const API_BASE_URL = window.location.hostname === 'localhost'
     ? 'http://localhost:8000'
     : 'https://api.tudominio.com';  // URL de producción
 
@@ -128,6 +128,33 @@ class ApiService {
     setToken(token) {
         this.token = token;
         localStorage.setItem('access_token', token);
+        console.log('Token saved, length:', token ? token.length : 0);
+    }
+
+    setAuthData(responseData) {
+        // Manejar diferentes estructuras de respuesta
+        const token = responseData.access_token || responseData.token;
+
+        if (token) {
+            this.setToken(token);
+        }
+
+        // Guardar refresh token si existe
+        if (responseData.refresh_token) {
+            localStorage.setItem('refresh_token', responseData.refresh_token);
+        }
+
+        // Guardar datos del usuario
+        if (responseData.user) {
+            localStorage.setItem('user_data', JSON.stringify(responseData.user));
+        }
+
+        // Guardar datos de la empresa
+        if (responseData.company) {
+            localStorage.setItem('company_data', JSON.stringify(responseData.company));
+        }
+
+        return !!token;
     }
 
     setRefreshToken(token) {

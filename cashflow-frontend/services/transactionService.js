@@ -11,13 +11,27 @@ export const transactionService = {
         try {
             const params = new URLSearchParams();
 
+            // Filtros existentes
             if (filters.start_date) params.append('start_date', filters.start_date);
             if (filters.end_date) params.append('end_date', filters.end_date);
             if (filters.account_id) params.append('account_id', filters.account_id);
+
+            // NUEVOS FILTROS
+            if (filters.company_id) params.append('company_id', filters.company_id);
+            if (filters.year) params.append('year', filters.year);
+            if (filters.month) params.append('month', filters.month);
             if (filters.limit) params.append('limit', filters.limit);
 
             const url = `api/incomes${params.toString() ? '?' + params.toString() : ''}`;
+
+            // 📌 Agregar log para depurar
+            console.log('URL de petición getIncomes:', url);
+
             const response = await api.get(url);
+
+            // 📌 Agregar log para depurar
+            console.log('Respuesta getIncomes:', response);
+
             return response;
         } catch (error) {
             console.error('Error en transactionService.getIncomes:', error);

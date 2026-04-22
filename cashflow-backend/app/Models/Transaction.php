@@ -685,4 +685,21 @@ abstract class Transaction extends BaseModel
         $result = $stmt->fetch();
         return (float) ($result['total'] ?? 0);
     }
+
+    // app/Models/Income.php - Agregar método getTotalGlobal
+    public function getTotalGlobal(string $startDate, string $endDate): float
+    {
+        $sql = "SELECT COALESCE(SUM(amount_base_currency), 0) as total 
+            FROM {$this->table} 
+            WHERE date BETWEEN :start_date AND :end_date";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([
+            'start_date' => $startDate,
+            'end_date' => $endDate
+        ]);
+
+        $result = $stmt->fetch();
+        return (float) ($result['total'] ?? 0);
+    }
 }

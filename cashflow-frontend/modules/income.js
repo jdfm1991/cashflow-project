@@ -26,10 +26,10 @@ export const incomeModule = {
     async render(container) {
         const user = api.getUser();
         const isSuperAdmin = user?.role === 'super_admin';
-        
+
         // Cargar monedas primero
         await this.loadCurrencies();
-        
+
         container.innerHTML = `
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h1 class="h3">Gestión de Ingresos</h1>
@@ -169,11 +169,11 @@ export const incomeModule = {
                 </div>
             </div>
         `;
-        
+
         if (isSuperAdmin) {
             await this.loadCompanies();
         }
-        
+
         await this.loadAccounts();
         await this.loadIncomes();
         this.setupEventListeners();
@@ -234,26 +234,37 @@ export const incomeModule = {
 
     async loadIncomes() {
         try {
+            // Construir filtros para la API
             const apiFilters = {};
-            
-            if (this.filters.company_id) {
+
+            if (this.filters.company_id && this.filters.company_id !== '') {
                 apiFilters.company_id = this.filters.company_id;
             }
-            if (this.filters.year) {
+            if (this.filters.year && this.filters.year !== '') {
                 apiFilters.year = this.filters.year;
             }
-            if (this.filters.month) {
+            if (this.filters.month && this.filters.month !== '') {
                 apiFilters.month = this.filters.month;
             }
-            if (this.filters.account_id) {
+            if (this.filters.account_id && this.filters.account_id !== '') {
                 apiFilters.account_id = this.filters.account_id;
             }
-            
+
+            // 📌 IMPORTANTE: Agregar log para depurar
+            console.log('Filtros enviados a getIncomes:', apiFilters);
+
             const response = await transactionService.getIncomes(apiFilters);
-            
+
             if (response.success && response.data) {
                 this.incomes = response.data.incomes || response.data;
                 this.renderDataTable();
+
+                // Mostrar mensaje con resultados
+                const totalRegistros = this.incomes.length;
+                if (totalRegistros === 0) {
+                    showAlert('No se encontraron ingresos con los filtros seleccionados', 'info');
+                }
+                showAlert(`Se encontraron ${totalRegistros} egresos`, 'info');
             }
         } catch (error) {
             console.error('Error loading incomes:', error);
@@ -281,7 +292,7 @@ export const incomeModule = {
 
         const user = api.getUser();
         const isSuperAdmin = user?.role === 'super_admin';
-        
+
         const total = this.incomes.reduce((sum, inc) => sum + (parseFloat(inc.amount_base_currency || inc.amount) || 0), 0);
 
         const tableData = this.incomes.map(income => {
@@ -289,15 +300,15 @@ export const incomeModule = {
                 income.id,
                 formatDate(income.date),
             ];
-            
+
             if (isSuperAdmin) {
                 row.push(income.company_name || '-');
             }
-            
+
             row.push(
                 income.account_name || '-',
-                income.payment_method === 'bank' ? 
-                    '<span class="badge bg-secondary"><i class="bi bi-bank"></i> Banco</span>' : 
+                income.payment_method === 'bank' ?
+                    '<span class="badge bg-secondary"><i class="bi bi-bank"></i> Banco</span>' :
                     '<span class="badge bg-success"><i class="bi bi-cash"></i> Efectivo</span>',
                 income.currency_code || 'VES',
                 `${parseFloat(income.amount).toFixed(2)} ${income.currency_code || 'VES'}`,
@@ -334,7 +345,7 @@ export const incomeModule = {
                 { extend: 'copy', text: '<i class="bi bi-files"></i> Copiar', className: 'btn btn-sm btn-secondary me-1' },
                 { extend: 'csv', text: '<i class="bi bi-filetype-csv"></i> CSV', className: 'btn btn-sm btn-info me-1' },
                 { extend: 'excel', text: '<i class="bi bi-file-excel"></i> Excel', className: 'btn btn-sm btn-success me-1' },
-                { 
+                {
                     text: '<i class="bi bi-file-pdf"></i> PDF Personalizado',
                     className: 'btn btn-sm btn-danger me-1',
                     action: () => this.exportToPDFWithGrouping()
@@ -346,7 +357,7 @@ export const incomeModule = {
                 this.attachTableEvents();
             }
         });
-        
+
         // Eventos de agrupación
         const groupBySelect = document.getElementById('pdfGroupBySelect');
         if (groupBySelect) {
@@ -354,21 +365,21 @@ export const incomeModule = {
                 this.pdfGroupBy = e.target.value;
             });
         }
-        
+
         const includeTablesCheckbox = document.getElementById('includeDetailedTables');
         if (includeTablesCheckbox) {
             includeTablesCheckbox.addEventListener('change', (e) => {
                 this.includeDetailedTables = e.target.checked;
             });
         }
-        
+
         this.updateActiveFiltersIndicator();
         this.attachTableEvents();
     },
 
     updateActiveFiltersIndicator() {
         const activeFilters = [];
-        
+
         if (this.filters.company_id && this.filters.company_id !== '') {
             const companyName = this.companies.find(c => c.id == this.filters.company_id)?.name;
             activeFilters.push(`Empresa: ${companyName || this.filters.company_id}`);
@@ -377,18 +388,18 @@ export const incomeModule = {
             activeFilters.push(`Año: ${this.filters.year}`);
         }
         if (this.filters.month && this.filters.month !== '') {
-            const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
-                            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+            const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
             activeFilters.push(`Mes: ${months[parseInt(this.filters.month) - 1]}`);
         }
         if (this.filters.account_id && this.filters.account_id !== '') {
             const accountName = this.accounts.find(a => a.id == this.filters.account_id)?.name;
             activeFilters.push(`Cuenta: ${accountName || this.filters.account_id}`);
         }
-        
+
         const existingIndicator = document.querySelector('.active-filters-indicator');
         if (existingIndicator) existingIndicator.remove();
-        
+
         if (activeFilters.length > 0) {
             const indicatorHtml = `
                 <div class="alert alert-success mt-2 active-filters-indicator">
@@ -396,7 +407,7 @@ export const incomeModule = {
                     <button type="button" class="btn-close float-end" id="clearFiltersBtn" aria-label="Cerrar" style="font-size: 0.75rem;"></button>
                 </div>
             `;
-            
+
             const cardBody = document.querySelector('#incomeTable').closest('.card-body');
             if (cardBody) {
                 let filterContainer = document.querySelector('.filters-indicator-container');
@@ -406,7 +417,7 @@ export const incomeModule = {
                     cardBody.insertBefore(filterContainer, cardBody.firstChild);
                 }
                 filterContainer.innerHTML = indicatorHtml;
-                
+
                 const clearBtn = document.getElementById('clearFiltersBtn');
                 if (clearBtn) {
                     clearBtn.addEventListener('click', () => this.resetAllFilters());
@@ -431,15 +442,15 @@ export const incomeModule = {
         if (document.getElementById('filterAccount')) {
             document.getElementById('filterAccount').value = '';
         }
-        
+
         this.filters = { company_id: '', year: '', month: '', account_id: '' };
-        
+
         const existingIndicator = document.querySelector('.active-filters-indicator');
         if (existingIndicator) existingIndicator.remove();
-        
+
         const filterContainer = document.querySelector('.filters-indicator-container');
         if (filterContainer) filterContainer.innerHTML = '';
-        
+
         this.loadIncomes();
         showAlert('Filtros reiniciados - Mostrando todos los ingresos', 'success');
     },
@@ -447,7 +458,7 @@ export const incomeModule = {
     showIncomeModal(income = null) {
         const isEdit = !!income;
         const title = isEdit ? 'Editar Ingreso' : 'Nuevo Ingreso';
-        
+
         const modalHtml = `
             <div class="modal fade" id="incomeModal" tabindex="-1" data-bs-backdrop="static">
                 <div class="modal-dialog modal-lg">
@@ -560,17 +571,17 @@ export const incomeModule = {
                 </div>
             </div>
         `;
-        
+
         const existingModal = document.getElementById('incomeModal');
         if (existingModal) existingModal.remove();
-        
+
         document.body.insertAdjacentHTML('beforeend', modalHtml);
-        
+
         this.setupExchangeRateEvents();
-        
+
         const modal = new bootstrap.Modal(document.getElementById('incomeModal'));
         modal.show();
-        
+
         const saveBtn = document.getElementById('saveIncomeBtn');
         if (saveBtn) {
             saveBtn.addEventListener('click', async () => await this.saveIncome(income));
@@ -585,20 +596,20 @@ export const incomeModule = {
         const baseAmountSpan = document.getElementById('baseAmountDisplay');
         const baseAmountDiv = document.getElementById('baseAmountInfo');
         const rateDateInfo = document.getElementById('rateDateInfo');
-        
+
         const updateExchangeRate = async () => {
             const date = dateInput?.value;
             const currencyId = currencySelect?.value;
             const amount = parseFloat(amountInput?.value) || 0;
-            
+
             if (!date || !currencyId || amount <= 0) {
                 if (rateInfo) rateInfo.value = 'Esperando datos...';
                 if (baseAmountDiv) baseAmountDiv.style.display = 'none';
                 return;
             }
-            
+
             const selectedCurrency = this.currencies.find(c => c.id == currencyId);
-            
+
             if (selectedCurrency?.is_base == 1) {
                 if (rateInfo) rateInfo.value = '1.00 (Moneda base)';
                 if (baseAmountSpan) baseAmountSpan.textContent = amount.toFixed(2);
@@ -606,9 +617,9 @@ export const incomeModule = {
                 if (rateDateInfo) rateDateInfo.textContent = '';
                 return;
             }
-            
+
             const result = await this.getExchangeRate(currencyId, this.baseCurrency?.id, date);
-            
+
             if (result.success && result.rate) {
                 const convertedAmount = amount * result.rate;
                 if (rateInfo) rateInfo.value = `${result.rate.toFixed(4)} (${selectedCurrency?.code} → ${this.baseCurrency?.code})`;
@@ -622,11 +633,11 @@ export const incomeModule = {
                 if (rateDateInfo) rateDateInfo.textContent = '⚠️ Configure una tasa de cambio para esta fecha';
             }
         };
-        
+
         if (dateInput) dateInput.addEventListener('change', updateExchangeRate);
         if (currencySelect) currencySelect.addEventListener('change', updateExchangeRate);
         if (amountInput) amountInput.addEventListener('input', updateExchangeRate);
-        
+
         updateExchangeRate();
     },
 
@@ -640,38 +651,38 @@ export const incomeModule = {
             const reference = document.getElementById('incomeReference')?.value;
             const description = document.getElementById('incomeDescription')?.value;
             const paymentMethod = document.getElementById('incomePaymentMethod')?.value;
-            
+
             if (!date) {
                 showAlert('La fecha es requerida', 'warning');
                 return;
             }
-            
+
             if (!accountId) {
                 showAlert('Debe seleccionar una cuenta de ingreso', 'warning');
                 return;
             }
-            
+
             if (!amount || parseFloat(amount) <= 0) {
                 showAlert('El monto debe ser mayor a 0', 'warning');
                 return;
             }
-            
+
             if (!currencyId) {
                 showAlert('Debe seleccionar una moneda', 'warning');
                 return;
             }
-            
+
             if (!paymentMethod) {
                 showAlert('El método de pago es requerido', 'warning');
                 return;
             }
-            
+
             const today = new Date().toISOString().split('T')[0];
             if (date > today) {
                 showAlert('No se puede registrar un ingreso con fecha futura', 'warning');
                 return;
             }
-            
+
             const incomeData = {
                 account_id: parseInt(accountId),
                 amount: parseFloat(amount),
@@ -681,9 +692,9 @@ export const incomeModule = {
                 description: description || null,
                 payment_method: paymentMethod
             };
-            
+
             let response;
-            
+
             if (id && id !== '') {
                 response = await transactionService.updateIncome(parseInt(id), incomeData);
                 if (response.success) {
@@ -699,11 +710,11 @@ export const incomeModule = {
                     this.closeModal();
                 }
             }
-            
+
             if (!response.success) {
                 showAlert(response.message || 'Error al guardar el ingreso', 'danger');
             }
-            
+
         } catch (error) {
             console.error('Error en saveIncome:', error);
             showAlert(error.message || 'Error al guardar el ingreso', 'danger');
@@ -727,16 +738,16 @@ export const incomeModule = {
                 if (income) this.showIncomeModal(income);
             });
         });
-        
+
         document.querySelectorAll('.delete-income').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const id = parseInt(btn.dataset.id);
                 const income = this.incomes.find(i => i.id === id);
                 if (!income) return;
-                
+
                 const confirmed = confirm(`¿Está seguro de eliminar el ingreso de ${formatCurrency(income.amount)} del ${formatDate(income.date)}?`);
                 if (!confirmed) return;
-                
+
                 try {
                     const response = await transactionService.deleteIncome(id);
                     if (response.success) {
@@ -764,23 +775,37 @@ export const incomeModule = {
                 this.showIncomeModal();
             });
         }
-        
+
         const applyBtn = document.getElementById('applyFiltersBtn');
         if (applyBtn) {
-            applyBtn.addEventListener('click', () => {
+            // Remover eventos anteriores para evitar duplicados
+            const newApplyBtn = applyBtn.cloneNode(true);
+            applyBtn.parentNode.replaceChild(newApplyBtn, applyBtn);
+
+            newApplyBtn.addEventListener('click', () => {
+                // Obtener valores actuales de los selects
                 this.filters = {
                     company_id: document.getElementById('filterCompany')?.value || '',
                     year: document.getElementById('filterYear')?.value || '',
                     month: document.getElementById('filterMonth')?.value || '',
                     account_id: document.getElementById('filterAccount')?.value || ''
                 };
+
+                // 📌 Log para depurar
+                console.log('Filtros aplicados:', this.filters);
+
                 this.loadIncomes();
             });
         }
-        
+
         const resetBtn = document.getElementById('resetFiltersBtn');
         if (resetBtn) {
-            resetBtn.addEventListener('click', () => this.resetAllFilters());
+            const newResetBtn = resetBtn.cloneNode(true);
+            resetBtn.parentNode.replaceChild(newResetBtn, resetBtn);
+
+            newResetBtn.addEventListener('click', () => {
+                this.resetAllFilters();
+            });
         }
     },
 
@@ -789,33 +814,33 @@ export const incomeModule = {
             showAlert('No hay datos para exportar', 'warning');
             return;
         }
-        
+
         const user = api.getUser();
         const isSuperAdmin = user?.role === 'super_admin';
         const showAllCompanies = isSuperAdmin && (!this.filters.company_id || this.filters.company_id === '');
-        
+
         const filtersInfo = {
-            company_name: this.filters.company_id && this.filters.company_id !== '' ? 
+            company_name: this.filters.company_id && this.filters.company_id !== '' ?
                 this.companies.find(c => c.id == this.filters.company_id)?.name : null,
             year: this.filters.year,
-            month_name: this.filters.month && this.filters.month !== '' ? 
+            month_name: this.filters.month && this.filters.month !== '' ?
                 this.getMonthName(this.filters.month) : null,
-            account_name: this.filters.account_id && this.filters.account_id !== '' ? 
+            account_name: this.filters.account_id && this.filters.account_id !== '' ?
                 this.accounts.find(a => a.id == this.filters.account_id)?.name : null
         };
-        
+
         pdfExportService.exportIncomesToPDF(
-            this.incomes, 
-            filtersInfo, 
-            this.pdfGroupBy, 
+            this.incomes,
+            filtersInfo,
+            this.pdfGroupBy,
             isSuperAdmin,
             showAllCompanies,
             this.includeDetailedTables
         );
-        
+
         const groupByText = this.getGroupByText(this.pdfGroupBy);
         const tablesText = this.includeDetailedTables ? 'con tablas detalladas' : 'solo resumen y gráficos';
-        
+
         if (showAllCompanies) {
             showAlert(`Exportando PDF agrupado por empresa y luego por ${groupByText} ${tablesText}...`, 'success');
         } else {
@@ -824,8 +849,8 @@ export const incomeModule = {
     },
 
     getMonthName(monthNumber) {
-        const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
-                       'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+        const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
         return months[parseInt(monthNumber) - 1];
     },
 
