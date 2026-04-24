@@ -188,8 +188,18 @@ class AuthController
             'role' => $user['role']
         ];
 
+        error_log("=== GENERANDO TOKEN ===");
+        error_log("Token data: " . json_encode($tokenData));
+
         $accessToken = $this->jwtService->generate($tokenData);
+        error_log("Token generado: " . substr($accessToken, 0, 100) . "...");
+
         $refreshToken = $this->generateRefreshToken($user['id']);
+
+        // Decodificar el token recién generado para verificar
+        $parts = explode('.', $accessToken);
+        $payload = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $parts[1])), true);
+        error_log("Payload del token generado: " . json_encode($payload));
 
         // Guardar refresh token
         $this->userModel->saveRefreshToken($user['id'], $refreshToken);

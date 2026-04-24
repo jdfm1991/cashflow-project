@@ -8,9 +8,15 @@ class Bank extends BaseModel
 {
     protected $table = 'banks';
     protected $fillable = [
-        'name', 'code', 'country', 'website', 'phone', 'logo', 'is_active'
+        'name',
+        'code',
+        'country',
+        'website',
+        'phone',
+        'logo',
+        'is_active'
     ];
-    
+
     /**
      * Obtener bancos activos (catálogo global)
      */
@@ -21,7 +27,7 @@ class Bank extends BaseModel
         $stmt->execute();
         return $stmt->fetchAll();
     }
-    
+
     /**
      * Buscar banco por código
      */
@@ -30,6 +36,15 @@ class Bank extends BaseModel
         $sql = "SELECT * FROM {$this->table} WHERE code = :code";
         $stmt = $this->db->prepare($sql);
         $stmt->execute(['code' => $code]);
+        $result = $stmt->fetch();
+        return $result ?: null;
+    }
+
+    public function findByName(string $name): ?array
+    {
+        $sql = "SELECT * FROM {$this->table} WHERE name = :name LIMIT 1";
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute(['name' => $name]);
         $result = $stmt->fetch();
         return $result ?: null;
     }

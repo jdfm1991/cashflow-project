@@ -686,7 +686,6 @@ abstract class Transaction extends BaseModel
         return (float) ($result['total'] ?? 0);
     }
 
-    // app/Models/Income.php - Agregar método getTotalGlobal
     public function getTotalGlobal(string $startDate, string $endDate): float
     {
         $sql = "SELECT COALESCE(SUM(amount_base_currency), 0) as total 

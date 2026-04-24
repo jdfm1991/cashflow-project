@@ -76,9 +76,12 @@ class JWTService
      */
     public function validate(string $token): ?array
     {
+        error_log("=== JWTService::validate ===");
+        error_log("Token a validar: " . substr($token, 0, 50) . "...");
         try {
             $parts = explode('.', $token);
             if (count($parts) !== 3) {
+                error_log("❌ Token no tiene 3 partes");
                 throw new \Exception('Token inválido');
             }
 
@@ -90,23 +93,31 @@ class JWTService
             $decodedSignature = base64_decode($expectedSignature);
 
             if (!hash_equals($signature, $decodedSignature)) {
+                error_log("❌ Firma inválida");
                 throw new \Exception('Firma inválida');
             }
 
             // Decodificar payload
-            $payload = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $base64UrlPayload)), true);
+            // Decodificar payload para ver qué contiene
+            $payloadJson = base64_decode(str_replace(['-', '_'], ['+', '/'], $base64UrlPayload));
+            error_log("Payload decodificado (raw): " . $payloadJson);
+
+            $payload = json_decode($payloadJson, true);
+            error_log("Payload como array: " . json_encode($payload));
 
             // Verificar expiración
             if (isset($payload['exp']) && $payload['exp'] < time()) {
+                $payload = json_decode($payloadJson, true);
                 throw new \Exception('Token expirado');
             }
 
             // ✅ Log para depuración
             error_log("JWTService: Token validado para user_id: " . ($payload['user_id'] ?? 'null'));
-
+            error_log("✅ Token válido para user_id: " . ($payload['user_id'] ?? 'null'));
             return $payload;
         } catch (\Exception $e) {
             error_log("JWTService validation error: " . $e->getMessage());
+            error_log("❌ Error en validate: " . $e->getMessage());
             return null;
         }
     }

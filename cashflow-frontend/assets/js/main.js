@@ -14,6 +14,7 @@ import { currenciesModule } from '../../modules/currencies.js';
 import { exchangeRatesModule } from '../../modules/exchange-rates.js';
 import { banksModule } from '../../modules/banks.js';
 import { bankAccountsModule } from '../../modules/bank-accounts.js';
+import { migrationModule } from '../../modules/migration.js';
 
 // Map of routes to modules
 const routes = {
@@ -29,7 +30,8 @@ const routes = {
     'income': incomeModule,
     'expense': expenseModule,
     'statements': statementsModule,
-    'reports': reportsModule
+    'reports': reportsModule,
+    'migration': migrationModule
 };
 
 // Módulos que requieren autenticación

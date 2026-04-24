@@ -96,6 +96,85 @@ return [
         'middleware' => ['AuthMiddleware']
     ],
 
+    // app/Config/Routes.php
+
+    // ============================================
+    // RUTAS DE MIGRACIÓN DE DATOS
+    // ============================================
+
+    // Conexiones
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/migrations/connections$#',
+        'controller' => 'App\\Controllers\\MigrationController',
+        'action' => 'getConnections',
+        'middleware' => ['AuthMiddleware']
+    ],
+    [
+        'method' => 'POST',
+        'pattern' => '#^api/migrations/connections$#',
+        'controller' => 'App\\Controllers\\MigrationController',
+        'action' => 'createConnection',
+        'middleware' => ['AuthMiddleware']
+    ],
+    [
+        'method' => 'DELETE',
+        'pattern' => '#^api/migrations/connections/(\d+)$#',  // ← NUEVA RUTA DELETE
+        'controller' => 'App\\Controllers\\MigrationController',
+        'action' => 'deleteConnection',
+        'middleware' => ['AuthMiddleware']
+    ],
+
+    // Migración
+    [
+        'method' => 'POST',
+        'pattern' => '#^api/migrations/preview$#',
+        'controller' => 'App\\Controllers\\MigrationController',
+        'action' => 'preview',
+        'middleware' => ['AuthMiddleware']
+    ],
+    [
+        'method' => 'POST',
+        'pattern' => '#^api/migrations/execute$#',
+        'controller' => 'App\\Controllers\\MigrationController',
+        'action' => 'execute',
+        'middleware' => ['AuthMiddleware']
+    ],
+
+    // Años y meses disponibles
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/migrations/years$#',
+        'controller' => 'App\\Controllers\\MigrationController',
+        'action' => 'getAvailableYears',
+        'middleware' => ['AuthMiddleware']
+    ],
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/migrations/months$#',
+        'controller' => 'App\\Controllers\\MigrationController',
+        'action' => 'getAvailableMonths',
+        'middleware' => ['AuthMiddleware']
+    ],
+
+    // Logs
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/migrations/logs$#',
+        'controller' => 'App\\Controllers\\MigrationController',
+        'action' => 'getLogs',
+        'middleware' => ['AuthMiddleware']
+    ],
+
+    // Test connection
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/migrations/test-connection$#',
+        'controller' => 'App\\Controllers\\MigrationController',
+        'action' => 'testConnection',
+        'middleware' => ['AuthMiddleware']
+    ],
+
     // ============================================
     // RUTAS DE EMPRESAS (NUEVAS)
     // ============================================
