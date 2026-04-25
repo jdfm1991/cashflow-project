@@ -14,6 +14,7 @@ class Expense extends Transaction
         'user_id',
         'account_id',
         'bank_account_id',
+        'bank_id',
         'amount',
         'currency_id',
         'exchange_rate',
@@ -21,6 +22,7 @@ class Expense extends Transaction
         'date',
         'description',
         'reference',
+        'payment_method',
         'receipt_path'
     ];
     protected $hidden = [];
@@ -29,5 +31,4 @@ class Expense extends Transaction
     {
         return $this->table;
     }
-
 }

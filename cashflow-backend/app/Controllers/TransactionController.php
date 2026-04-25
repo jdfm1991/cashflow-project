@@ -37,25 +37,22 @@ class TransactionController
             return;
         }
 
-        // Obtener filtros de la request
-        $companyId = isset($_GET['company_id']) ? (int) $_GET['company_id'] : null;
+        // Obtener filtros
+        $companyId = isset($_GET['company_id']) && $_GET['company_id'] !== '' ? (int) $_GET['company_id'] : null;
         $year = $_GET['year'] ?? null;
         $month = $_GET['month'] ?? null;
         $accountId = isset($_GET['account_id']) ? (int) $_GET['account_id'] : null;
         $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : null;
 
-        // Construir filtros para el modelo
+        // Construir filtros
         $filters = [];
 
-        // Convertir año/mes a rango de fechas
         if ($year && !empty($year)) {
             if ($month && !empty($month)) {
-                // Mes específico
                 $monthPadded = str_pad($month, 2, '0', STR_PAD_LEFT);
                 $filters['start_date'] = "{$year}-{$monthPadded}-01";
                 $filters['end_date'] = date("Y-m-t", strtotime($filters['start_date']));
             } else {
-                // Año completo
                 $filters['start_date'] = "{$year}-01-01";
                 $filters['end_date'] = "{$year}-12-31";
             }
@@ -65,35 +62,31 @@ class TransactionController
             $filters['account_id'] = $accountId;
         }
 
-        // Log para depuración
-        error_log("getIncomes - Role: {$userRole}, CompanyId filter: " . ($companyId ?? 'null'));
-        error_log("getIncomes - Filters: " . json_encode($filters));
+        error_log("=== GET INCOMES ===");
+        error_log("Role: " . $userRole);
+        error_log("Company ID filter: " . ($companyId ?? 'null'));
+        error_log("Filters: " . json_encode($filters));
 
-        // Obtener ingresos según el rol del usuario
+        // Obtener ingresos según el rol
         if ($userRole === 'super_admin') {
-            // Super admin puede ver todas las empresas
-            if ($companyId && $companyId > 0) {
-                // Filtrar por empresa específica
-                $incomes = $this->incomeModel->getByCompanyWithFilters($companyId, $filters, $limit);
-            } else {
-                // Ver todas las empresas (global)
-                $incomes = $this->incomeModel->getGlobalWithFilters($filters, $limit);
-            }
+            $incomes = $this->incomeModel->getGlobalWithFilters($filters, $limit);
         } else {
-            // Usuarios normales solo ven su propia empresa
             $userCompanyId = $this->getCompanyId($userId);
-            if ($userCompanyId <= 0) {
-                Response::error('Usuario no tiene empresa asociada', 400);
-                return;
-            }
             $incomes = $this->incomeModel->getByCompanyWithFilters($userCompanyId, $filters, $limit);
         }
 
-        // Calcular total en moneda base
+        // Convertir montos a float
+        foreach ($incomes as &$income) {
+            $income['amount'] = (float) $income['amount'];
+            $income['amount_base_currency'] = (float) ($income['amount_base_currency'] ?? $income['amount']);
+            $income['exchange_rate'] = (float) ($income['exchange_rate'] ?? 1);
+        }
+
         $total = array_sum(array_column($incomes, 'amount_base_currency'));
 
+        // ✅ CORREGIDO: Devolver 'incomes', no 'expenses'
         Response::success([
-            'incomes' => $incomes,
+            'incomes' => $incomes,   // ← Esto debe ser 'incomes'
             'total' => $total,
             'count' => count($incomes)
         ]);
@@ -131,19 +124,31 @@ class TransactionController
      */
     public function createIncome(): void
     {
-        $userId = $this->getUserId();
-        $companyId = $this->getCompanyId($userId);
 
-        if ($userId <= 0 || $companyId <= 0) {
-            Response::unauthorized('Usuario no autenticado');
-            return;
-        }
+        $userId = $this->getUserId();
+        $userRole = $this->getUserRole($userId);
 
         $rawInput = file_get_contents('php://input');
         $data = json_decode($rawInput, true);
 
-        if (empty($data) || $data === null) {
-            Response::error('No se recibieron datos', 400);
+        // ✅ CORREGIDO: Determinar company_id según el rol
+        $companyId = null;
+
+        if ($userRole === 'super_admin') {
+            if (isset($data['company_id']) && $data['company_id'] > 0) {
+                $companyId = (int) $data['company_id'];
+                error_log("Super admin creando ingreso para empresa: {$companyId}");
+            } else {
+                $companyId = $this->getCompanyId($userId);
+                error_log("Super admin sin company_id específico, usando su empresa: {$companyId}");
+            }
+        } else {
+            $companyId = $this->getCompanyId($userId);
+            error_log("Usuario normal creando ingreso para su empresa: {$companyId}");
+        }
+
+        if ($userId <= 0 || $companyId <= 0) {
+            Response::unauthorized('Usuario no autenticado o sin empresa asociada');
             return;
         }
 
@@ -447,25 +452,22 @@ class TransactionController
             return;
         }
 
-        // Obtener filtros de la request
-        $companyId = isset($_GET['company_id']) ? (int) $_GET['company_id'] : null;
+        // Obtener filtros
+        $companyId = isset($_GET['company_id']) && $_GET['company_id'] !== '' ? (int) $_GET['company_id'] : null;
         $year = $_GET['year'] ?? null;
         $month = $_GET['month'] ?? null;
         $accountId = isset($_GET['account_id']) ? (int) $_GET['account_id'] : null;
         $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : null;
 
-        // Construir filtros para el modelo
+        // Construir filtros
         $filters = [];
 
-        // Convertir año/mes a rango de fechas
         if ($year && !empty($year)) {
             if ($month && !empty($month)) {
-                // Mes específico
                 $monthPadded = str_pad($month, 2, '0', STR_PAD_LEFT);
                 $filters['start_date'] = "{$year}-{$monthPadded}-01";
                 $filters['end_date'] = date("Y-m-t", strtotime($filters['start_date']));
             } else {
-                // Año completo
                 $filters['start_date'] = "{$year}-01-01";
                 $filters['end_date'] = "{$year}-12-31";
             }
@@ -475,31 +477,18 @@ class TransactionController
             $filters['account_id'] = $accountId;
         }
 
-        // Log para depuración
-        error_log("getExpenses - Role: {$userRole}, CompanyId filter: " . ($companyId ?? 'null'));
-        error_log("getExpenses - Filters: " . json_encode($filters));
+        error_log("=== GET EXPENSES ===");
+        error_log("Role: " . $userRole);
+        error_log("Company ID filter: " . ($companyId ?? 'null'));
 
-        // Obtener egresos según el rol del usuario
+        // ✅ Obtener egresos según el rol
         if ($userRole === 'super_admin') {
-            // Super admin puede ver todas las empresas
-            if ($companyId && $companyId > 0) {
-                // Filtrar por empresa específica
-                $expenses = $this->expenseModel->getByCompanyWithFilters($companyId, $filters, $limit);
-            } else {
-                // Ver todas las empresas (global)
-                $expenses = $this->expenseModel->getGlobalWithFilters($filters, $limit);
-            }
+            $expenses = $this->expenseModel->getGlobalWithFilters($filters, $limit);
         } else {
-            // Usuarios normales solo ven su propia empresa
             $userCompanyId = $this->getCompanyId($userId);
-            if ($userCompanyId <= 0) {
-                Response::error('Usuario no tiene empresa asociada', 400);
-                return;
-            }
             $expenses = $this->expenseModel->getByCompanyWithFilters($userCompanyId, $filters, $limit);
         }
 
-        // Calcular total en moneda base
         $total = array_sum(array_column($expenses, 'amount_base_currency'));
 
         Response::success([
@@ -515,22 +504,12 @@ class TransactionController
     public function createExpense(): void
     {
         $userId = $this->getUserId();
-        $companyId = $this->getCompanyId($userId);
-
-        if ($userId <= 0 || $companyId <= 0) {
-            Response::unauthorized('Usuario no autenticado');
-            return;
-        }
+        $userRole = $this->getUserRole($userId);
 
         $rawInput = file_get_contents('php://input');
         $data = json_decode($rawInput, true);
 
-        if (empty($data) || $data === null) {
-            Response::error('No se recibieron datos', 400);
-            return;
-        }
-
-        // Validaciones
+        // Validaciones básicas
         $validator = new Validator($data);
         $validator->required('account_id');
         $validator->numeric('account_id');
@@ -539,13 +518,33 @@ class TransactionController
         $validator->min('amount', 0.01);
         $validator->required('date');
         $validator->date('date', 'Y-m-d');
-        $validator->optional('currency_id');
-        $validator->numeric('currency_id');
-        $validator->optional('payment_method');
-        $validator->in('payment_method', ['cash', 'bank']);
 
         if (!$validator->passes()) {
             Response::validationError($validator->errors());
+            return;
+        }
+
+        // ✅ CORREGIDO: Determinar company_id según el rol
+        $companyId = null;
+
+        if ($userRole === 'super_admin') {
+            // Si es super_admin y se envió company_id en el request, usar ese
+            if (isset($data['company_id']) && $data['company_id'] > 0) {
+                $companyId = (int) $data['company_id'];
+                error_log("Super admin creando egreso para empresa: {$companyId}");
+            } else {
+                // Si no se envió, usar la empresa del usuario
+                $companyId = $this->getCompanyId($userId);
+                error_log("Super admin sin company_id específico, usando su empresa: {$companyId}");
+            }
+        } else {
+            // Usuario normal: usar su empresa
+            $companyId = $this->getCompanyId($userId);
+            error_log("Usuario normal creando egreso para su empresa: {$companyId}");
+        }
+
+        if ($userId <= 0 || $companyId <= 0) {
+            Response::unauthorized('Usuario no autenticado o sin empresa asociada');
             return;
         }
 
@@ -555,32 +554,21 @@ class TransactionController
             return;
         }
 
-        // Verificar que la cuenta existe y es de tipo expense
-        $accountModel = new \App\Models\Account();
-        $account = $accountModel->find((int) $data['account_id']);
-
-        if (!$account) {
-            Response::notFound('Cuenta no encontrada');
+        // Verificar cuenta
+        $account = $this->accountModel->find((int) $data['account_id']);
+        if (!$account || $account['type'] !== 'expense') {
+            Response::validationError(['account_id' => 'Cuenta no válida para egreso']);
             return;
         }
 
-        if ($account['type'] !== 'expense') {
-            Response::validationError(['account_id' => 'La cuenta seleccionada no es de tipo egreso']);
-            return;
-        }
-
-        // ========== NUEVO: MANEJO DE MONEDA Y CONVERSIÓN ==========
-
+        // Manejo de moneda y conversión
         $currencyService = new \App\Services\CurrencyService();
         $baseCurrency = $currencyService->getBaseCurrency();
-
-        // Obtener moneda seleccionada (por defecto la moneda base)
         $currencyId = isset($data['currency_id']) ? (int) $data['currency_id'] : ($baseCurrency['id'] ?? 9);
         $amount = (float) $data['amount'];
         $exchangeRate = 1;
         $amountBaseCurrency = $amount;
 
-        // Verificar que la moneda existe
         $currencyModel = new \App\Models\Currency();
         $currency = $currencyModel->find($currencyId);
         if (!$currency) {
@@ -588,10 +576,8 @@ class TransactionController
             return;
         }
 
-        // Si la moneda seleccionada NO es la moneda base, buscar tasa de cambio
         if ($baseCurrency && $currencyId != $baseCurrency['id']) {
             $conversion = $currencyService->convert($amount, $currencyId, $baseCurrency['id'], $data['date']);
-
             if ($conversion['success']) {
                 $exchangeRate = $conversion['rate'];
                 $amountBaseCurrency = $conversion['converted_amount'];
@@ -603,11 +589,15 @@ class TransactionController
             }
         }
 
-        // ========== FIN DE LA NUEVA LÓGICA ==========
+        // Obtener payment_method
+        $paymentMethod = $data['payment_method'] ?? 'cash';
+        if (!in_array($paymentMethod, ['cash', 'bank'])) {
+            $paymentMethod = 'cash';
+        }
 
         // Crear egreso
         $expenseData = [
-            'company_id' => $companyId,
+            'company_id' => $companyId,  // ← Usar el company_id determinado
             'user_id' => $userId,
             'account_id' => (int) $data['account_id'],
             'amount' => $amount,
@@ -617,8 +607,10 @@ class TransactionController
             'date' => $data['date'],
             'description' => $data['description'] ?? null,
             'reference' => $data['reference'] ?? null,
-            'payment_method' => $data['payment_method'] ?? 'cash'
+            'payment_method' => $paymentMethod
         ];
+
+        error_log("Datos de egreso a guardar: " . json_encode($expenseData));
 
         $expense = $this->expenseModel->create($expenseData);
 
@@ -628,7 +620,6 @@ class TransactionController
             Response::error('Error al registrar el egreso', 500);
         }
     }
-
     /**
      * GET /api/expenses/{id}
      * Obtener egreso específico

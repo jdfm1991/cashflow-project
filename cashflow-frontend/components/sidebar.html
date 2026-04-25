@@ -109,6 +109,12 @@
             </div>
             <ul class="nav flex-column section-content" id="section-catalogs" style="display: none;">
                 <li class="nav-item">
+                    <a href="#categories" class="nav-link">
+                        <i class="bi bi-list-task me-2"></i>
+                        <span>Categorías</span>
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a href="#accounts" class="nav-link">
                         <i class="bi bi-bookshelf me-2"></i>
                         <span>Cuentas Contables</span>
@@ -523,4 +529,23 @@
             initSidebar();
         }
     })();
+
+    // Agregar al final del script en sidebar.html
+    // Función para depurar qué ruta se está intentando cargar
+    function debugRouting() {
+        console.log('=== DEBUG ROUTING ===');
+        console.log('Current hash:', window.location.hash);
+        console.log('Available modules in main.js:', window.availableModules || 'No disponible');
+
+        // Verificar si el módulo de categorías existe
+        const categoryLink = document.querySelector('a[href="#categories"]');
+        if (categoryLink) {
+            console.log('Link a categorías encontrado');
+        } else {
+            console.log('Link a categorías NO encontrado');
+        }
+    }
+
+    // Ejecutar debug después de cargar
+    setTimeout(debugRouting, 1000);
 </script>

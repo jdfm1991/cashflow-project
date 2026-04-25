@@ -1,22 +1,33 @@
-// modules/statements.js - Versión con tabla simple sin paginación
+// modules/statements.js - Versión con permisos multi-empresa
 
 import { api } from '../services/apiService.js';
 import { uploadService } from '../services/uploadService.js';
 import { bankService } from '../services/bankService.js';
 import { bankAccountService } from '../services/bankAccountService.js';
 import { accountService } from '../services/accountService.js';
+import { companyService } from '../services/companyService.js';
 import { formatAmountWithDecimals, formatCurrency, formatDate, showAlert } from '../utils/helpers.js';
 
 export const statementsModule = {
     banks: [],
     bankAccounts: [],
+    companies: [],           // ← NUEVO: lista de empresas
     incomeAccounts: [],
     expenseAccounts: [],
     currentSessionId: null,
     fullPreviewData: [],
     transactionMappings: {},
+    currentCompanyId: null,  // ← NUEVO: empresa actualmente seleccionada
 
     async render(container) {
+        const user = api.getUser();
+        const isSuperAdmin = user?.role === 'super_admin';
+
+        // Cargar empresas si es super_admin
+        if (isSuperAdmin) {
+            await this.loadCompanies();
+        }
+
         container.innerHTML = `
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h1 class="h3">Carga Masiva de Estados de Cuenta</h1>
@@ -29,20 +40,31 @@ export const statementsModule = {
                 </div>
                 <div class="card-body">
                     <div class="row g-3">
+                        ${isSuperAdmin ? `
                         <div class="col-md-3">
+                            <label class="form-label fw-semibold">
+                                <i class="bi bi-building"></i> Empresa *
+                            </label>
+                            <select class="form-select" id="companySelect" required>
+                                <option value="">Seleccione una empresa</option>
+                                ${this.companies.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                            </select>
+                        </div>
+                        ` : ''}
+                        <div class="col-md-${isSuperAdmin ? '3' : '4'}">
                             <label class="form-label fw-semibold">Banco *</label>
                             <select class="form-select" id="bankSelect" required>
                                 <option value="">Seleccione un banco</option>
                             </select>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-${isSuperAdmin ? '3' : '4'}">
                             <label class="form-label fw-semibold">Cuenta Bancaria</label>
                             <select class="form-select" id="bankAccountSelect">
                                 <option value="">Seleccione una cuenta (opcional)</option>
                             </select>
                             <small class="text-muted d-block mt-1">Si selecciona una cuenta, se usará su moneda para conversión</small>
                         </div>
-                        <div class="col-md-5">
+                        <div class="col-md-${isSuperAdmin ? '3' : '4'}">
                             <label class="form-label fw-semibold">Archivo *</label>
                             <div class="row g-2">
                                 <div class="col-12">
@@ -63,8 +85,6 @@ export const statementsModule = {
                 </div>
             </div>
 
-
-            
             <!-- Resumen de la carga -->
             <div id="summaryPanel" style="display: none;">
                 <div class="row mb-4">
@@ -150,9 +170,7 @@ export const statementsModule = {
                                 </tr>
                             </thead>
                             <tbody id="previewTableBody">
-                                <tr>
-                                    <td colspan="6" class="text-center text-muted">Cargando...</td>
-                                </tr>
+                                <td><td colspan="6" class="text-center text-muted">Cargando...</tr>
                             </tbody>
                         </table>
                     </div>
@@ -169,20 +187,70 @@ export const statementsModule = {
             </div>
         `;
 
-        await this.loadBanks();
-        await this.loadBankAccounts();
+        // Si es super_admin, cargar bancos solo después de seleccionar empresa
+        if (isSuperAdmin) {
+            const companySelect = document.getElementById('companySelect');
+            if (companySelect) {
+                companySelect.addEventListener('change', () => {
+                    this.currentCompanyId = companySelect.value;
+                    if (this.currentCompanyId) {
+                        this.loadBanks();
+                        this.loadBankAccounts();
+                    } else {
+                        // Limpiar selects
+                        const bankSelect = document.getElementById('bankSelect');
+                        if (bankSelect) bankSelect.innerHTML = '<option value="">Primero seleccione empresa</option>';
+                        const bankAccountSelect = document.getElementById('bankAccountSelect');
+                        if (bankAccountSelect) bankAccountSelect.innerHTML = '<option value="">Seleccione una cuenta (opcional)</option>';
+                    }
+                });
+            }
+        } else {
+            // Usuario normal, cargar bancos directamente
+            await this.loadBanks();
+            await this.loadBankAccounts();
+        }
+
         await this.loadAccounts();
         this.setupEventListeners();
     },
 
+    async loadCompanies() {
+        try {
+            const response = await companyService.getAll();
+            if (response.success && response.data) {
+                this.companies = response.data;
+                console.log('Empresas cargadas:', this.companies.length);
+            }
+        } catch (error) {
+            console.error('Error loading companies:', error);
+            showAlert('Error al cargar las empresas', 'danger');
+        }
+    },
+
     async loadBanks() {
         try {
-            const response = await uploadService.getBanks();
+            // Si es super_admin y hay empresa seleccionada, pasar parámetro
+            const user = api.getUser();
+            const isSuperAdmin = user?.role === 'super_admin';
+            const companyId = this.currentCompanyId;
+
+            let response;
+            if (isSuperAdmin && companyId) {
+                // Pasar company_id al backend para filtrar bancos/cuentas
+                response = await uploadService.getBanks(companyId);
+            } else {
+                response = await uploadService.getBanks();
+            }
+
             if (response.success && response.data) {
                 this.banks = response.data;
                 const select = document.getElementById('bankSelect');
-                select.innerHTML = '<option value="">Seleccione un banco</option>' +
-                    this.banks.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+                if (select) {
+                    select.innerHTML = '<option value="">Seleccione un banco</option>' +
+                        this.banks.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+                    select.disabled = false;
+                }
             }
         } catch (error) {
             console.error('Error loading banks:', error);
@@ -192,7 +260,17 @@ export const statementsModule = {
 
     async loadBankAccounts() {
         try {
-            const response = await uploadService.getBankAccounts();
+            const user = api.getUser();
+            const isSuperAdmin = user?.role === 'super_admin';
+            const companyId = this.currentCompanyId;
+
+            let response;
+            if (isSuperAdmin && companyId) {
+                response = await uploadService.getBankAccounts(companyId);
+            } else {
+                response = await uploadService.getBankAccounts();
+            }
+
             if (response.success && response.data) {
                 this.bankAccounts = response.data;
                 this.updateBankAccountsFilter();
@@ -271,10 +349,21 @@ export const statementsModule = {
     },
 
     async uploadFile() {
+        const user = api.getUser();
+        const isSuperAdmin = user?.role === 'super_admin';
+
+        // Obtener empresa seleccionada (solo para super_admin)
+        const companyId = isSuperAdmin ? document.getElementById('companySelect')?.value : null;
         const bankId = document.getElementById('bankSelect').value;
         const bankAccountId = document.getElementById('bankAccountSelect').value;
         const fileInput = document.getElementById('statementFile');
         const file = fileInput.files[0];
+
+        // Validaciones
+        if (isSuperAdmin && !companyId) {
+            showAlert('Seleccione una empresa', 'warning');
+            return;
+        }
 
         if (!bankId) {
             showAlert('Seleccione un banco', 'warning');
@@ -292,11 +381,11 @@ export const statementsModule = {
         uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span> Procesando...';
 
         try {
-            const response = await uploadService.uploadStatement(bankId, bankAccountId, file);
+            // Pasar company_id si es super_admin
+            const response = await uploadService.uploadStatement(bankId, bankAccountId, file, companyId);
 
             if (response.success && response.data) {
                 this.currentSessionId = response.data.session_id;
-                // ✅ Asegurar que los datos incluyen el id
                 this.fullPreviewData = response.data.preview.map((item, index) => ({
                     ...item,
                     id: response.data.preview_ids ? response.data.preview_ids[index] : index + 1
@@ -325,13 +414,13 @@ export const statementsModule = {
         const tbody = document.getElementById('previewTableBody');
 
         if (!this.fullPreviewData || this.fullPreviewData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No hay datos para mostrar</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No hay datos para mostrar</tr>';
             return;
         }
 
         let html = '';
 
-        this.fullPreviewData.forEach((transaction, index) => {
+        this.fullPreviewData.forEach((transaction) => {
             const accounts = transaction.transaction_type === 'income' ? this.incomeAccounts : this.expenseAccounts;
             const savedMapping = this.transactionMappings[transaction.id];
 
@@ -345,7 +434,6 @@ export const statementsModule = {
 
             selectHtml += `</select>`;
 
-            // ✅ Usar la función importada o local
             const formattedAmount = typeof formatAmountWithDecimals === 'function'
                 ? formatAmountWithDecimals(Math.abs(transaction.amount))
                 : this.formatAmountWithDecimals(Math.abs(transaction.amount));
@@ -364,8 +452,8 @@ export const statementsModule = {
                     </span>
                 </td>
                 <td>${selectHtml}</td>
-            </td>
-        `;
+            <tr>
+            `;
         });
 
         tbody.innerHTML = html;
@@ -550,13 +638,23 @@ export const statementsModule = {
             saveBtn.innerHTML = originalText;
         }
     },
+
     cancelImport() {
+        const user = api.getUser();
+        const isSuperAdmin = user?.role === 'super_admin';
+
+        if (isSuperAdmin) {
+            const companySelect = document.getElementById('companySelect');
+            if (companySelect) companySelect.value = '';
+            this.currentCompanyId = null;
+        }
+
         document.getElementById('bankSelect').value = '';
         document.getElementById('bankAccountSelect').innerHTML = '<option value="">Seleccione una cuenta (opcional)</option>';
         document.getElementById('statementFile').value = '';
         document.getElementById('summaryPanel').style.display = 'none';
         document.getElementById('mappingPanel').style.display = 'none';
-        document.getElementById('previewTableBody').innerHTML = '<tr><td colspan="6" class="text-center text-muted">Cargando...</td></tr>';
+        document.getElementById('previewTableBody').innerHTML = '<tr><td colspan="6" class="text-center text-muted">Cargando...</tr>';
 
         this.currentSessionId = null;
         this.fullPreviewData = [];
@@ -564,5 +662,4 @@ export const statementsModule = {
 
         showAlert('Importación cancelada', 'info');
     }
-
 };

@@ -1,10 +1,9 @@
-// modules/income.js
 import { transactionService } from '../services/transactionService.js';
 import { accountService } from '../services/accountService.js';
 import { companyService } from '../services/companyService.js';
 import { formatCurrency, formatDate, showAlert } from '../utils/helpers.js';
-import { api } from '../services/apiService.js';
 import { pdfExportService } from '../services/pdfExportService.js';
+import { api } from '../services/apiService.js';
 
 export const incomeModule = {
     incomes: [],
@@ -12,6 +11,8 @@ export const incomeModule = {
     companies: [],
     currencies: [],
     baseCurrency: null,
+    pdfGroupBy: 'month',
+    includeDetailedTables: true,
     filters: {
         company_id: '',
         year: '',
@@ -20,8 +21,6 @@ export const incomeModule = {
     },
     dataTable: null,
     currentYear: new Date().getFullYear(),
-    pdfGroupBy: 'month',
-    includeDetailedTables: true,
 
     async render(container) {
         const user = api.getUser();
@@ -170,6 +169,7 @@ export const incomeModule = {
             </div>
         `;
 
+        // Cargar empresas solo si es super_admin
         if (isSuperAdmin) {
             await this.loadCompanies();
         }
@@ -201,6 +201,11 @@ export const incomeModule = {
             }
         } catch (error) {
             console.error('Error loading companies:', error);
+            if (error.status === 403) {
+                console.log('Usuario no es super_admin, ocultando selector de empresas');
+                const filterCompanyDiv = document.getElementById('filterCompany')?.closest('.col-md-3');
+                if (filterCompanyDiv) filterCompanyDiv.style.display = 'none';
+            }
         }
     },
 
@@ -220,21 +225,8 @@ export const incomeModule = {
         }
     },
 
-    async loadCurrencies() {
-        try {
-            const response = await api.get('api/currencies');
-            if (response.success && response.data) {
-                this.currencies = response.data;
-                this.baseCurrency = this.currencies.find(c => c.is_base == 1);
-            }
-        } catch (error) {
-            console.error('Error loading currencies:', error);
-        }
-    },
-
     async loadIncomes() {
         try {
-            // Construir filtros para la API
             const apiFilters = {};
 
             if (this.filters.company_id && this.filters.company_id !== '') {
@@ -250,38 +242,80 @@ export const incomeModule = {
                 apiFilters.account_id = this.filters.account_id;
             }
 
-            // 📌 IMPORTANTE: Agregar log para depurar
-            console.log('Filtros enviados a getIncomes:', apiFilters);
+            console.log('Filtros aplicados (ingresos):', apiFilters);
 
             const response = await transactionService.getIncomes(apiFilters);
 
-            if (response.success && response.data) {
-                this.incomes = response.data.incomes || response.data;
-                this.renderDataTable();
+            console.log('Respuesta completa:', response);
 
-                // Mostrar mensaje con resultados
-                const totalRegistros = this.incomes.length;
-                if (totalRegistros === 0) {
-                    showAlert('No se encontraron ingresos con los filtros seleccionados', 'info');
-                }
-                showAlert(`Se encontraron ${totalRegistros} egresos`, 'info');
+            // ✅ Validar que la respuesta existe
+            if (!response) {
+                console.error('La respuesta es nula o undefined');
+                this.incomes = [];
+                this.renderDataTable();
+                showAlert('Error al cargar los ingresos: respuesta vacía', 'danger');
+                return;
             }
+
+            // ✅ Validar que la respuesta es exitosa
+            if (!response.success) {
+                console.error('Respuesta no exitosa:', response.message);
+                this.incomes = [];
+                this.renderDataTable();
+                showAlert(response.message || 'Error al cargar los ingresos', 'danger');
+                return;
+            }
+
+            // ✅ Validar que response.data existe
+            if (!response.data) {
+                console.error('response.data es undefined o null');
+                this.incomes = [];
+                this.renderDataTable();
+                showAlert('Error: No se recibieron datos del servidor', 'danger');
+                return;
+            }
+
+            console.log('response.data:', response.data);
+            console.log('Tipo de response.data:', typeof response.data);
+
+            // ✅ Extraer los ingresos de la respuesta
+            let incomesData = null;
+
+            if (response.data.incomes && Array.isArray(response.data.incomes)) {
+                incomesData = response.data.incomes;
+                console.log('✅ Estructura: response.data.incomes, cantidad:', incomesData.length);
+            }
+            else if (Array.isArray(response.data)) {
+                incomesData = response.data;
+                console.log('✅ Estructura: response.data es array, cantidad:', incomesData.length);
+            }
+            else if (response.data.data && Array.isArray(response.data.data)) {
+                incomesData = response.data.data;
+                console.log('✅ Estructura: response.data.data, cantidad:', incomesData.length);
+            }
+            else {
+                console.warn('⚠️ No se encontró un array de ingresos en la respuesta');
+                console.log('Propiedades de response.data:', Object.keys(response.data));
+                incomesData = [];
+            }
+
+            this.incomes = incomesData || [];
+            console.log('Ingresos cargados:', this.incomes.length);
+
+            this.renderDataTable();
+
+            if (this.incomes.length === 0) {
+                showAlert('No se encontraron ingresos con los filtros seleccionados', 'info');
+            } else {
+                showAlert(`Se encontraron ${this.incomes.length} ingresos`, 'info');
+            }
+
         } catch (error) {
             console.error('Error loading incomes:', error);
-            showAlert('Error al cargar los ingresos', 'danger');
-        }
-    },
-
-    async getExchangeRate(fromCurrencyId, toCurrencyId, date) {
-        try {
-            const response = await api.get(`api/exchange-rates?from=${fromCurrencyId}&to=${toCurrencyId}&date=${date}`);
-            if (response.success && response.data && response.data.rate) {
-                return { success: true, rate: parseFloat(response.data.rate) };
-            }
-            return { success: false, rate: null };
-        } catch (error) {
-            console.error('Error getting exchange rate:', error);
-            return { success: false, rate: null };
+            console.error('Stack:', error.stack);
+            this.incomes = [];
+            this.renderDataTable();
+            showAlert('Error al cargar los ingresos: ' + (error.message || 'Error desconocido'), 'danger');
         }
     },
 
@@ -293,7 +327,14 @@ export const incomeModule = {
         const user = api.getUser();
         const isSuperAdmin = user?.role === 'super_admin';
 
-        const total = this.incomes.reduce((sum, inc) => sum + (parseFloat(inc.amount_base_currency || inc.amount) || 0), 0);
+        // ✅ Asegurar que this.incomes sea un array
+        if (!Array.isArray(this.incomes)) {
+            console.warn('this.incomes no es un array:', this.incomes);
+            this.incomes = [];
+        }
+
+        // Calcular total solo si hay datos
+        const total = this.incomes.length > 0 ? this.incomes.reduce((sum, inc) => sum + (parseFloat(inc.amount_base_currency || inc.amount) || 0), 0) : 0;
 
         const tableData = this.incomes.map(income => {
             const row = [
@@ -317,18 +358,54 @@ export const incomeModule = {
                 income.description || '-',
                 income.reference || '-',
                 `
-                    <div class="btn-group btn-group-sm">
-                        <button class="btn btn-outline-primary edit-income" data-id="${income.id}" title="Editar ingreso">
-                            <i class="bi bi-pencil"></i>
-                        </button>
-                        <button class="btn btn-outline-danger delete-income" data-id="${income.id}" title="Eliminar">
-                            <i class="bi bi-trash"></i>
-                        </button>
-                    </div>
-                `
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-primary edit-income" data-id="${income.id}" title="Editar ingreso">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-outline-danger delete-income" data-id="${income.id}" title="Eliminar">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            `
             );
             return row;
         });
+
+        // ✅ Si no hay datos, mostrar mensaje
+        if (tableData.length === 0) {
+            const colCount = isSuperAdmin ? 12 : 11;
+            $('#incomeTable').html(`
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Fecha</th>
+                    ${isSuperAdmin ? '<th>Empresa</th>' : ''}
+                    <th>Cuenta</th>
+                    <th>Origen</th>
+                    <th>Moneda</th>
+                    <th>Monto Original</th>
+                    <th>Tasa</th>
+                    <th>Monto (Base)</th>
+                    <th>Descripción</th>
+                    <th>Referencia</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="${colCount}" class="text-center text-muted">No hay ingresos para mostrar</td></tr>
+            </tbody>
+            <tfoot>
+                <tr>
+                    <th colspan="${isSuperAdmin ? '8' : '7'}" class="text-end">Total en Moneda Base:</th>
+                    <th id="totalAmount" class="text-success">$0.00</th>
+                    <th colspan="3"></th>
+                </tr>
+            </tfoot>
+        `);
+
+            document.getElementById('totalAmount').innerHTML = formatCurrency(0);
+            return;
+        }
 
         this.dataTable = $('#incomeTable').DataTable({
             data: tableData,
@@ -358,7 +435,6 @@ export const incomeModule = {
             }
         });
 
-        // Eventos de agrupación
         const groupBySelect = document.getElementById('pdfGroupBySelect');
         if (groupBySelect) {
             groupBySelect.addEventListener('change', (e) => {
@@ -377,200 +453,196 @@ export const incomeModule = {
         this.attachTableEvents();
     },
 
-    updateActiveFiltersIndicator() {
-        const activeFilters = [];
-
-        if (this.filters.company_id && this.filters.company_id !== '') {
-            const companyName = this.companies.find(c => c.id == this.filters.company_id)?.name;
-            activeFilters.push(`Empresa: ${companyName || this.filters.company_id}`);
-        }
-        if (this.filters.year && this.filters.year !== '') {
-            activeFilters.push(`Año: ${this.filters.year}`);
-        }
-        if (this.filters.month && this.filters.month !== '') {
-            const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-                'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-            activeFilters.push(`Mes: ${months[parseInt(this.filters.month) - 1]}`);
-        }
-        if (this.filters.account_id && this.filters.account_id !== '') {
-            const accountName = this.accounts.find(a => a.id == this.filters.account_id)?.name;
-            activeFilters.push(`Cuenta: ${accountName || this.filters.account_id}`);
+    exportToPDFWithGrouping() {
+        if (!this.incomes || this.incomes.length === 0) {
+            showAlert('No hay datos para exportar', 'warning');
+            return;
         }
 
-        const existingIndicator = document.querySelector('.active-filters-indicator');
-        if (existingIndicator) existingIndicator.remove();
+        const user = api.getUser();
+        const isSuperAdmin = user?.role === 'super_admin';
+        const showAllCompanies = isSuperAdmin && (!this.filters.company_id || this.filters.company_id === '');
 
-        if (activeFilters.length > 0) {
-            const indicatorHtml = `
-                <div class="alert alert-success mt-2 active-filters-indicator">
-                    <i class="bi bi-funnel-fill"></i> <strong>Filtros activos:</strong> ${activeFilters.join(' | ')}
-                    <button type="button" class="btn-close float-end" id="clearFiltersBtn" aria-label="Cerrar" style="font-size: 0.75rem;"></button>
-                </div>
-            `;
+        const filtersInfo = {
+            company_name: this.filters.company_id && this.filters.company_id !== '' ?
+                this.companies.find(c => c.id == this.filters.company_id)?.name : null,
+            year: this.filters.year,
+            month_name: this.filters.month && this.filters.month !== '' ?
+                this.getMonthName(this.filters.month) : null,
+            account_name: this.filters.account_id && this.filters.account_id !== '' ?
+                this.accounts.find(a => a.id == this.filters.account_id)?.name : null
+        };
 
-            const cardBody = document.querySelector('#incomeTable').closest('.card-body');
-            if (cardBody) {
-                let filterContainer = document.querySelector('.filters-indicator-container');
-                if (!filterContainer) {
-                    filterContainer = document.createElement('div');
-                    filterContainer.className = 'filters-indicator-container';
-                    cardBody.insertBefore(filterContainer, cardBody.firstChild);
-                }
-                filterContainer.innerHTML = indicatorHtml;
+        pdfExportService.exportIncomesToPDF(
+            this.incomes,
+            filtersInfo,
+            this.pdfGroupBy,
+            isSuperAdmin,
+            showAllCompanies,
+            this.includeDetailedTables
+        );
 
-                const clearBtn = document.getElementById('clearFiltersBtn');
-                if (clearBtn) {
-                    clearBtn.addEventListener('click', () => this.resetAllFilters());
-                }
-            }
+        const groupByText = this.getGroupByText(this.pdfGroupBy);
+        const tablesText = this.includeDetailedTables ? 'con tablas detalladas' : 'solo resumen y gráficos';
+        if (showAllCompanies) {
+            showAlert(`Exportando PDF agrupado por empresa y luego por ${groupByText} ${tablesText}...`, 'success');
         } else {
-            const filterContainer = document.querySelector('.filters-indicator-container');
-            if (filterContainer) filterContainer.innerHTML = '';
+            showAlert(`Exportando PDF agrupado por ${groupByText} ${tablesText}...`, 'success');
         }
     },
 
-    resetAllFilters() {
-        if (document.getElementById('filterCompany')) {
-            document.getElementById('filterCompany').value = '';
-        }
-        if (document.getElementById('filterYear')) {
-            document.getElementById('filterYear').value = '';
-        }
-        if (document.getElementById('filterMonth')) {
-            document.getElementById('filterMonth').value = '';
-        }
-        if (document.getElementById('filterAccount')) {
-            document.getElementById('filterAccount').value = '';
-        }
+    getMonthName(monthNumber) {
+        const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+        return months[parseInt(monthNumber) - 1];
+    },
 
-        this.filters = { company_id: '', year: '', month: '', account_id: '' };
-
-        const existingIndicator = document.querySelector('.active-filters-indicator');
-        if (existingIndicator) existingIndicator.remove();
-
-        const filterContainer = document.querySelector('.filters-indicator-container');
-        if (filterContainer) filterContainer.innerHTML = '';
-
-        this.loadIncomes();
-        showAlert('Filtros reiniciados - Mostrando todos los ingresos', 'success');
+    getGroupByText(groupBy) {
+        const texts = {
+            'week': 'semanas',
+            'month': 'meses',
+            'quarter': 'trimestres',
+            'semester': 'semestres',
+            'year': 'años'
+        };
+        return texts[groupBy] || 'meses';
     },
 
     showIncomeModal(income = null) {
         const isEdit = !!income;
         const title = isEdit ? 'Editar Ingreso' : 'Nuevo Ingreso';
+        const user = api.getUser();
+        const isSuperAdmin = user?.role === 'super_admin';
 
         const modalHtml = `
-            <div class="modal fade" id="incomeModal" tabindex="-1" data-bs-backdrop="static">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content">
-                        <div class="modal-header bg-success text-white">
-                            <h5 class="modal-title">
-                                <i class="bi bi-cash-stack"></i> ${title}
-                            </h5>
-                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <form id="incomeForm">
-                                <input type="hidden" id="incomeId" value="${income?.id || ''}">
-                                
-                                <div class="row">
-                                    <div class="col-md-6 mb-3">
-                                        <label class="form-label required">Fecha</label>
-                                        <input type="date" class="form-control" id="incomeDate" 
-                                               value="${income?.date || new Date().toISOString().split('T')[0]}" required>
-                                    </div>
-                                    
-                                    <div class="col-md-6 mb-3">
-                                        <label class="form-label required">Cuenta de Ingreso</label>
-                                        <select class="form-select" id="incomeAccount" required>
-                                            <option value="">Seleccione una cuenta</option>
-                                            ${this.accounts.filter(acc => acc.type === 'income').map(acc => `
-                                                <option value="${acc.id}" ${income?.account_id == acc.id ? 'selected' : ''}>
-                                                    ${acc.name} ${acc.category ? `(${acc.category})` : ''}
-                                                </option>
-                                            `).join('')}
-                                        </select>
-                                    </div>
-                                </div>
-                                
-                                <div class="row">
-                                    <div class="col-md-4 mb-3">
-                                        <label class="form-label required">Monto</label>
-                                        <input type="number" step="0.01" class="form-control" id="incomeAmount" 
-                                               value="${income?.amount || ''}" placeholder="0.00" required>
-                                    </div>
-                                    
-                                    <div class="col-md-4 mb-3">
-                                        <label class="form-label required">Moneda</label>
-                                        <select class="form-select" id="incomeCurrency" required>
-                                            <option value="">Seleccione una moneda</option>
-                                            ${this.currencies.map(curr => `
-                                                <option value="${curr.id}" 
-                                                    ${income?.currency_id == curr.id ? 'selected' : ''}>
-                                                    ${curr.code} - ${curr.name} (${curr.symbol})
-                                                </option>
-                                            `).join('')}
-                                        </select>
-                                    </div>
-                                    
-                                    <div class="col-md-4 mb-3">
-                                        <label class="form-label">Tasa de cambio</label>
-                                        <div class="input-group">
-                                            <span class="input-group-text bg-success text-white">
-                                                <i class="bi bi-currency-exchange"></i>
-                                            </span>
-                                            <input type="text" class="form-control" id="exchangeRateInfo" 
-                                                   readonly placeholder="Se calculará automáticamente">
-                                        </div>
-                                        <small class="text-muted" id="rateDateInfo"></small>
-                                    </div>
-                                </div>
-                                
-                                <div class="alert alert-success mb-3" id="baseAmountInfo" style="display: none;">
-                                    <i class="bi bi-currency-exchange"></i>
-                                    <strong>Monto en moneda base (${this.baseCurrency?.code || 'VES'}):</strong>
-                                    <span id="baseAmountDisplay">0.00</span>
-                                </div>
-                                
-                                <div class="row">
-                                    <div class="col-md-6 mb-3">
-                                        <label class="form-label">Referencia</label>
-                                        <input type="text" class="form-control" id="incomeReference" 
-                                               value="${income?.reference || ''}" placeholder="N° de comprobante, factura, etc.">
-                                    </div>
-                                    
-                                    <div class="col-md-6 mb-3">
-                                        <label class="form-label required">Método de Pago</label>
-                                        <select class="form-select" id="incomePaymentMethod" required>
-                                            <option value="cash" ${income?.payment_method === 'cash' || !income ? 'selected' : ''}>
-                                                💵 Efectivo
+        <div class="modal fade" id="incomeModal" tabindex="-1" data-bs-backdrop="static">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header bg-success text-white">
+                        <h5 class="modal-title">
+                            <i class="bi bi-cash-stack"></i> ${title}
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="incomeForm">
+                            <input type="hidden" id="incomeId" value="${income?.id || ''}">
+                            
+                            ${isSuperAdmin ? `
+                            <div class="row mb-3">
+                                <div class="col-md-12">
+                                    <label class="form-label required">
+                                        <i class="bi bi-building"></i> Empresa
+                                    </label>
+                                    <select class="form-select" id="incomeCompany" required>
+                                        <option value="">Seleccione una empresa</option>
+                                        ${this.companies.map(c => `
+                                            <option value="${c.id}" ${income?.company_id == c.id ? 'selected' : ''}>
+                                                ${c.name}
                                             </option>
-                                            <option value="bank" ${income?.payment_method === 'bank' ? 'selected' : ''}>
-                                                🏦 Banco
-                                            </option>
-                                        </select>
-                                    </div>
+                                        `).join('')}
+                                    </select>
+                                    <small class="text-muted">Seleccione la empresa a la que pertenece este ingreso</small>
+                                </div>
+                            </div>
+                            ` : ''}
+                            
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label required">Fecha</label>
+                                    <input type="date" class="form-control" id="incomeDate" 
+                                           value="${income?.date || new Date().toISOString().split('T')[0]}" required>
                                 </div>
                                 
-                                <div class="mb-3">
-                                    <label class="form-label">Descripción</label>
-                                    <textarea class="form-control" id="incomeDescription" rows="3" 
-                                              placeholder="Descripción detallada del ingreso...">${income?.description || ''}</textarea>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label required">Cuenta de Ingreso</label>
+                                    <select class="form-select" id="incomeAccount" required>
+                                        <option value="">Seleccione una cuenta</option>
+                                        ${this.accounts.filter(acc => acc.type === 'income').map(acc => `
+                                            <option value="${acc.id}" ${income?.account_id == acc.id ? 'selected' : ''}>
+                                                ${acc.name} ${acc.category ? `(${acc.category})` : ''}
+                                            </option>
+                                        `).join('')}
+                                    </select>
                                 </div>
-                            </form>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                                <i class="bi bi-x-circle"></i> Cancelar
-                            </button>
-                            <button type="button" class="btn btn-success" id="saveIncomeBtn">
-                                <i class="bi bi-save"></i> ${isEdit ? 'Actualizar' : 'Guardar'} Ingreso
-                            </button>
-                        </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label required">Monto</label>
+                                    <input type="number" step="0.01" class="form-control" id="incomeAmount" 
+                                           value="${income?.amount || ''}" placeholder="0.00" required>
+                                </div>
+                                
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label required">Moneda</label>
+                                    <select class="form-select" id="incomeCurrency" required>
+                                        <option value="">Seleccione una moneda</option>
+                                        ${this.currencies.map(curr => `
+                                            <option value="${curr.id}" 
+                                                data-code="${curr.code}"
+                                                data-symbol="${curr.symbol}"
+                                                ${income?.currency_id == curr.id ? 'selected' : ''}>
+                                                ${curr.code} - ${curr.name} (${curr.symbol})
+                                            </option>
+                                        `).join('')}
+                                    </select>
+                                </div>
+                                
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Tasa de cambio</label>
+                                    <div class="input-group">
+                                        <span class="input-group-text bg-success text-white">
+                                            <i class="bi bi-currency-exchange"></i>
+                                        </span>
+                                        <input type="text" class="form-control" id="exchangeRateInfo" 
+                                               readonly placeholder="Se calculará automáticamente">
+                                    </div>
+                                    <small class="text-muted" id="rateDateInfo"></small>
+                                </div>
+                            </div>
+                            
+                            <div class="alert alert-success mb-3" id="baseAmountInfo" style="display: none;">
+                                <i class="bi bi-currency-exchange"></i>
+                                <strong>Monto en moneda base (${this.baseCurrency?.code || 'VES'}):</strong>
+                                <span id="baseAmountDisplay">0.00</span>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Referencia</label>
+                                    <input type="text" class="form-control" id="incomeReference" 
+                                           value="${income?.reference || ''}" placeholder="N° de comprobante, factura, etc.">
+                                </div>
+                                
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label required">Método de Pago</label>
+                                    <select class="form-select" id="incomePaymentMethod" required>
+                                        <option value="cash" selected>💵 Efectivo</option>
+                                        <option value="bank">🏦 Banco</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label">Descripción</label>
+                                <textarea class="form-control" id="incomeDescription" rows="3" 
+                                          placeholder="Descripción detallada del ingreso...">${income?.description || ''}</textarea>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                            <i class="bi bi-x-circle"></i> Cancelar
+                        </button>
+                        <button type="button" class="btn btn-success" id="saveIncomeBtn">
+                            <i class="bi bi-save"></i> ${isEdit ? 'Actualizar' : 'Guardar'} Ingreso
+                        </button>
                     </div>
                 </div>
             </div>
-        `;
+        </div>
+    `;
 
         const existingModal = document.getElementById('incomeModal');
         if (existingModal) existingModal.remove();
@@ -585,6 +657,33 @@ export const incomeModule = {
         const saveBtn = document.getElementById('saveIncomeBtn');
         if (saveBtn) {
             saveBtn.addEventListener('click', async () => await this.saveIncome(income));
+        }
+    },
+
+    async loadCurrencies() {
+        try {
+            const response = await api.get('api/currencies');
+            if (response.success && response.data) {
+                this.currencies = response.data;
+                this.baseCurrency = this.currencies.find(c => c.is_base == 1);
+                console.log('Monedas cargadas:', this.currencies.length);
+                console.log('Moneda base:', this.baseCurrency);
+            }
+        } catch (error) {
+            console.error('Error loading currencies:', error);
+        }
+    },
+
+    async getExchangeRate(fromCurrencyId, toCurrencyId, date) {
+        try {
+            const response = await api.get(`api/exchange-rates?from=${fromCurrencyId}&to=${toCurrencyId}&date=${date}`);
+            if (response.success && response.data && response.data.rate) {
+                return { success: true, rate: parseFloat(response.data.rate) };
+            }
+            return { success: false, rate: null };
+        } catch (error) {
+            console.error('Error getting exchange rate:', error);
+            return { success: false, rate: null };
         }
     },
 
@@ -637,13 +736,16 @@ export const incomeModule = {
         if (dateInput) dateInput.addEventListener('change', updateExchangeRate);
         if (currencySelect) currencySelect.addEventListener('change', updateExchangeRate);
         if (amountInput) amountInput.addEventListener('input', updateExchangeRate);
-
         updateExchangeRate();
     },
 
     async saveIncome(existingIncome = null) {
         try {
+            const user = api.getUser();
+            const isSuperAdmin = user?.role === 'super_admin';
+
             const id = document.getElementById('incomeId')?.value;
+            const companyId = isSuperAdmin ? document.getElementById('incomeCompany')?.value : null;
             const date = document.getElementById('incomeDate')?.value;
             const accountId = document.getElementById('incomeAccount')?.value;
             const amount = document.getElementById('incomeAmount')?.value;
@@ -651,6 +753,11 @@ export const incomeModule = {
             const reference = document.getElementById('incomeReference')?.value;
             const description = document.getElementById('incomeDescription')?.value;
             const paymentMethod = document.getElementById('incomePaymentMethod')?.value;
+
+            if (isSuperAdmin && !companyId) {
+                showAlert('Debe seleccionar una empresa', 'warning');
+                return;
+            }
 
             if (!date) {
                 showAlert('La fecha es requerida', 'warning');
@@ -693,6 +800,10 @@ export const incomeModule = {
                 payment_method: paymentMethod
             };
 
+            if (isSuperAdmin && companyId) {
+                incomeData.company_id = parseInt(companyId);
+            }
+
             let response;
 
             if (id && id !== '') {
@@ -725,8 +836,12 @@ export const incomeModule = {
         const modal = document.getElementById('incomeModal');
         if (modal) {
             const bootstrapModal = bootstrap.Modal.getInstance(modal);
-            if (bootstrapModal) bootstrapModal.hide();
-            setTimeout(() => modal.remove(), 300);
+            if (bootstrapModal) {
+                bootstrapModal.hide();
+            }
+            setTimeout(() => {
+                modal.remove();
+            }, 300);
         }
     },
 
@@ -735,7 +850,9 @@ export const incomeModule = {
             btn.addEventListener('click', () => {
                 const id = parseInt(btn.dataset.id);
                 const income = this.incomes.find(i => i.id === id);
-                if (income) this.showIncomeModal(income);
+                if (income) {
+                    this.showIncomeModal(income);
+                }
             });
         });
 
@@ -753,8 +870,11 @@ export const incomeModule = {
                     if (response.success) {
                         showAlert('Ingreso eliminado exitosamente', 'success');
                         await this.loadIncomes();
+                    } else {
+                        showAlert(response.message || 'Error al eliminar el ingreso', 'danger');
                     }
                 } catch (error) {
+                    console.error('Error al eliminar:', error);
                     showAlert(error.message || 'Error al eliminar el ingreso', 'danger');
                 }
             });
@@ -763,106 +883,107 @@ export const incomeModule = {
 
     setupEventListeners() {
         const addBtn = document.getElementById('addIncomeBtn');
-        if (addBtn) {
-            const newAddBtn = addBtn.cloneNode(true);
-            addBtn.parentNode.replaceChild(newAddBtn, addBtn);
-            newAddBtn.addEventListener('click', () => {
-                const incomeAccounts = this.accounts.filter(acc => acc.type === 'income');
-                if (incomeAccounts.length === 0) {
-                    showAlert('No hay cuentas de ingreso configuradas. Por favor, crea una cuenta de ingreso primero.', 'warning');
-                    return;
-                }
-                this.showIncomeModal();
-            });
-        }
+        if (addBtn) addBtn.addEventListener('click', () => this.showIncomeModal());
 
         const applyBtn = document.getElementById('applyFiltersBtn');
         if (applyBtn) {
-            // Remover eventos anteriores para evitar duplicados
-            const newApplyBtn = applyBtn.cloneNode(true);
-            applyBtn.parentNode.replaceChild(newApplyBtn, applyBtn);
-
-            newApplyBtn.addEventListener('click', () => {
-                // Obtener valores actuales de los selects
+            applyBtn.addEventListener('click', () => {
                 this.filters = {
                     company_id: document.getElementById('filterCompany')?.value || '',
                     year: document.getElementById('filterYear')?.value || '',
                     month: document.getElementById('filterMonth')?.value || '',
                     account_id: document.getElementById('filterAccount')?.value || ''
                 };
-
-                // 📌 Log para depurar
-                console.log('Filtros aplicados:', this.filters);
-
                 this.loadIncomes();
             });
         }
 
         const resetBtn = document.getElementById('resetFiltersBtn');
         if (resetBtn) {
-            const newResetBtn = resetBtn.cloneNode(true);
-            resetBtn.parentNode.replaceChild(newResetBtn, resetBtn);
-
-            newResetBtn.addEventListener('click', () => {
+            resetBtn.addEventListener('click', () => {
                 this.resetAllFilters();
             });
         }
     },
 
-    exportToPDFWithGrouping() {
-        if (!this.incomes || this.incomes.length === 0) {
-            showAlert('No hay datos para exportar', 'warning');
-            return;
+    updateActiveFiltersIndicator() {
+        const activeFilters = [];
+
+        if (this.filters.company_id && this.filters.company_id !== '') {
+            const companyName = this.companies.find(c => c.id == this.filters.company_id)?.name;
+            activeFilters.push(`Empresa: ${companyName || this.filters.company_id}`);
+        }
+        if (this.filters.year && this.filters.year !== '') {
+            activeFilters.push(`Año: ${this.filters.year}`);
+        }
+        if (this.filters.month && this.filters.month !== '') {
+            const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+            activeFilters.push(`Mes: ${months[parseInt(this.filters.month) - 1]}`);
+        }
+        if (this.filters.account_id && this.filters.account_id !== '') {
+            const accountName = this.accounts.find(a => a.id == this.filters.account_id)?.name;
+            activeFilters.push(`Cuenta: ${accountName || this.filters.account_id}`);
         }
 
-        const user = api.getUser();
-        const isSuperAdmin = user?.role === 'super_admin';
-        const showAllCompanies = isSuperAdmin && (!this.filters.company_id || this.filters.company_id === '');
+        const existingIndicator = document.querySelector('.active-filters-indicator');
+        if (existingIndicator) existingIndicator.remove();
 
-        const filtersInfo = {
-            company_name: this.filters.company_id && this.filters.company_id !== '' ?
-                this.companies.find(c => c.id == this.filters.company_id)?.name : null,
-            year: this.filters.year,
-            month_name: this.filters.month && this.filters.month !== '' ?
-                this.getMonthName(this.filters.month) : null,
-            account_name: this.filters.account_id && this.filters.account_id !== '' ?
-                this.accounts.find(a => a.id == this.filters.account_id)?.name : null
-        };
+        if (activeFilters.length > 0) {
+            const indicatorHtml = `
+            <div class="alert alert-success mt-2 active-filters-indicator">
+                <i class="bi bi-funnel-fill"></i> <strong>Filtros activos:</strong> ${activeFilters.join(' | ')}
+                <button type="button" class="btn-close float-end" id="clearFiltersBtn" aria-label="Cerrar" style="font-size: 0.75rem;"></button>
+            </div>
+        `;
 
-        pdfExportService.exportIncomesToPDF(
-            this.incomes,
-            filtersInfo,
-            this.pdfGroupBy,
-            isSuperAdmin,
-            showAllCompanies,
-            this.includeDetailedTables
-        );
+            const cardBody = document.querySelector('#incomeTable').closest('.card-body');
+            if (cardBody) {
+                let filterContainer = document.querySelector('.filters-indicator-container');
+                if (!filterContainer) {
+                    filterContainer = document.createElement('div');
+                    filterContainer.className = 'filters-indicator-container';
+                    cardBody.insertBefore(filterContainer, cardBody.firstChild);
+                }
+                filterContainer.innerHTML = indicatorHtml;
 
-        const groupByText = this.getGroupByText(this.pdfGroupBy);
-        const tablesText = this.includeDetailedTables ? 'con tablas detalladas' : 'solo resumen y gráficos';
-
-        if (showAllCompanies) {
-            showAlert(`Exportando PDF agrupado por empresa y luego por ${groupByText} ${tablesText}...`, 'success');
+                const clearBtn = document.getElementById('clearFiltersBtn');
+                if (clearBtn) {
+                    clearBtn.addEventListener('click', () => {
+                        this.resetAllFilters();
+                    });
+                }
+            }
         } else {
-            showAlert(`Exportando PDF agrupado por ${groupByText} ${tablesText}...`, 'success');
+            const filterContainer = document.querySelector('.filters-indicator-container');
+            if (filterContainer) filterContainer.innerHTML = '';
         }
     },
 
-    getMonthName(monthNumber) {
-        const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-        return months[parseInt(monthNumber) - 1];
-    },
+    resetAllFilters() {
+        if (document.getElementById('filterCompany')) {
+            document.getElementById('filterCompany').value = '';
+        }
+        if (document.getElementById('filterYear')) {
+            document.getElementById('filterYear').value = '';
+        }
+        if (document.getElementById('filterMonth')) {
+            document.getElementById('filterMonth').value = '';
+        }
+        if (document.getElementById('filterAccount')) {
+            document.getElementById('filterAccount').value = '';
+        }
 
-    getGroupByText(groupBy) {
-        const texts = {
-            'week': 'semanas',
-            'month': 'meses',
-            'quarter': 'trimestres',
-            'semester': 'semestres',
-            'year': 'años'
-        };
-        return texts[groupBy] || 'meses';
+        this.filters = { company_id: '', year: '', month: '', account_id: '' };
+
+        const existingIndicator = document.querySelector('.active-filters-indicator');
+        if (existingIndicator) existingIndicator.remove();
+
+        const filterContainer = document.querySelector('.filters-indicator-container');
+        if (filterContainer) filterContainer.innerHTML = '';
+
+        this.loadIncomes();
+        showAlert('Filtros reiniciados - Mostrando todos los ingresos', 'success');
     },
 
     escapeHtml(text) {

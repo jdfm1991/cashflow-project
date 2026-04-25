@@ -485,7 +485,11 @@ export const expenseModule = {
     /**
     * Modal simplificado para editar solo la descripción de egresos bancarios
     */
+
     showBankExpenseEditModal(expense) {
+        const user = api.getUser();
+        const isSuperAdmin = user?.role === 'super_admin';
+
         const modalHtml = `
         <div class="modal fade" id="expenseModal" tabindex="-1" data-bs-backdrop="static">
             <div class="modal-dialog">
@@ -505,6 +509,17 @@ export const expenseModule = {
                         </div>
                         
                         <input type="hidden" id="expenseId" value="${expense.id}">
+                        
+                        ${isSuperAdmin ? `
+                        <div class="row mb-3">
+                            <div class="col-md-12">
+                                <label class="form-label text-muted">Empresa</label>
+                                <div class="form-control-plaintext">
+                                    <strong>${expense.company_name || expense.company_id || '-'}</strong>
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
                         
                         <!-- Información de solo lectura -->
                         <div class="row">
@@ -628,6 +643,8 @@ export const expenseModule = {
     showFullExpenseModal(expense = null) {
         const isEdit = !!expense;
         const title = isEdit ? 'Editar Egreso en Efectivo' : 'Nuevo Egreso';
+        const user = api.getUser();
+        const isSuperAdmin = user?.role === 'super_admin';
 
         const modalHtml = `
         <div class="modal fade" id="expenseModal" tabindex="-1" data-bs-backdrop="static">
@@ -642,6 +659,26 @@ export const expenseModule = {
                     <div class="modal-body">
                         <form id="expenseForm">
                             <input type="hidden" id="expenseId" value="${expense?.id || ''}">
+                            
+                            ${isSuperAdmin ? `
+                            <!-- Selector de empresa (solo visible para super_admin) -->
+                            <div class="row mb-3">
+                                <div class="col-md-12">
+                                    <label class="form-label required">
+                                        <i class="bi bi-building"></i> Empresa
+                                    </label>
+                                    <select class="form-select" id="expenseCompany" required>
+                                        <option value="">Seleccione una empresa</option>
+                                        ${this.companies.map(c => `
+                                            <option value="${c.id}" ${expense?.company_id == c.id ? 'selected' : ''}>
+                                                ${c.name}
+                                            </option>
+                                        `).join('')}
+                                    </select>
+                                    <small class="text-muted">Seleccione la empresa a la que pertenece este egreso</small>
+                                </div>
+                            </div>
+                            ` : ''}
                             
                             <div class="row">
                                 <div class="col-md-6 mb-3">
@@ -714,14 +751,9 @@ export const expenseModule = {
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label required">Método de Pago</label>
                                     <select class="form-select" id="expensePaymentMethod" required>
-                                        <option value="cash" ${expense?.payment_method === 'cash' || !expense ? 'selected' : ''}>
-                                            💵 Efectivo
-                                        </option>
-                                        <option value="bank" ${expense?.payment_method === 'bank' ? 'selected' : ''} 
-                                                ${expense?.id ? 'disabled' : ''}>
-                                            🏦 Banco (Solo lectura - gestión desde estados de cuenta)
-                                        </option>
-                                    </select>
+                                        <option value="cash" selected>💵 Efectivo</option>
+                                        <option value="bank">🏦 Banco</option>
+                                    </select> 
                                     ${expense?.id && expense?.payment_method === 'bank' ?
                 '<small class="text-muted">Los egresos bancarios solo permiten editar la descripción.</small>' :
                 '<small class="text-muted">Los egresos bancarios se gestionan desde la carga de estados de cuenta</small>'}
@@ -871,7 +903,11 @@ export const expenseModule = {
      */
     async saveExpense(existingExpense = null) {
         try {
+            const user = api.getUser();
+            const isSuperAdmin = user?.role === 'super_admin';
+
             const id = document.getElementById('expenseId')?.value;
+            const companyId = isSuperAdmin ? document.getElementById('expenseCompany')?.value : null;
             const date = document.getElementById('expenseDate')?.value;
             const accountId = document.getElementById('expenseAccount')?.value;
             const amount = document.getElementById('expenseAmount')?.value;
@@ -881,6 +917,11 @@ export const expenseModule = {
             const paymentMethod = document.getElementById('expensePaymentMethod')?.value;
 
             // Validaciones
+            if (isSuperAdmin && !companyId) {
+                showAlert('Debe seleccionar una empresa', 'warning');
+                return;
+            }
+
             if (!date) {
                 showAlert('La fecha es requerida', 'warning');
                 return;
@@ -916,12 +957,17 @@ export const expenseModule = {
             const expenseData = {
                 account_id: parseInt(accountId),
                 amount: parseFloat(amount),
-                currency_id: parseInt(currencyId),  // ← NUEVO
+                currency_id: parseInt(currencyId),
                 date: date,
                 reference: reference || null,
                 description: description || null,
                 payment_method: paymentMethod
             };
+
+            // ✅ Si es super_admin, incluir company_id
+            if (isSuperAdmin && companyId) {
+                expenseData.company_id = parseInt(companyId);
+            }
 
             let response;
 
@@ -950,7 +996,7 @@ export const expenseModule = {
             showAlert(error.message || 'Error al guardar el egreso', 'danger');
         }
     },
-    
+
     /**
      * Cerrar el modal
      */

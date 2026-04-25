@@ -2,21 +2,32 @@
 import { api } from './apiService.js';
 
 export const uploadService = {
-    async getBanks() {
-        const response = await api.get('api/uploads/banks');
+    async getBanks(companyId = null) {
+        let url = 'api/uploads/banks';
+        if (companyId) {
+            url += `?company_id=${companyId}`;
+        }
+        const response = await api.get(url);
         return response;
     },
 
-    async getBankAccounts() {
-        const response = await api.get('api/uploads/bank-accounts');
+    async getBankAccounts(companyId = null) {
+        let url = 'api/uploads/bank-accounts';
+        if (companyId) {
+            url += `?company_id=${companyId}`;
+        }
+        const response = await api.get(url);
         return response;
     },
 
-    async uploadStatement(bankId, bankAccountId, file) {
+    async uploadStatement(bankId, bankAccountId, file, companyId = null) {
         const formData = new FormData();
         formData.append('bank_id', bankId);
         if (bankAccountId) {
             formData.append('bank_account_id', bankAccountId);
+        }
+        if (companyId) {
+            formData.append('company_id', companyId);
         }
         formData.append('file', file);
 

@@ -133,4 +133,26 @@ class MigrationLog extends BaseModel
 
         return $stmt->fetchAll();
     }
+
+    // app/Models/MigrationLog.php
+
+    /**
+     * Obtener todos los logs (para super_admin)
+     */
+    public function getAll(int $limit = 50): array
+    {
+        $sql = "SELECT ml.*, ec.name as connection_name, c.name as company_name, u.username as created_by_name
+            FROM {$this->table} ml
+            LEFT JOIN external_connections ec ON ml.connection_id = ec.id
+            LEFT JOIN companies c ON ml.company_id = c.id
+            LEFT JOIN users u ON ml.created_by = u.id
+            ORDER BY ml.created_at DESC
+            LIMIT :limit";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->bindValue('limit', $limit, \PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetchAll();
+    }
 }

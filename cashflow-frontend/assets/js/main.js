@@ -1,4 +1,3 @@
-// assets/js/main.js
 import { api } from '../../services/apiService.js';
 import { loadComponent, showAlert } from '../../utils/helpers.js';
 import { dashboardModule } from '../../modules/dashboard.js';
@@ -15,6 +14,7 @@ import { exchangeRatesModule } from '../../modules/exchange-rates.js';
 import { banksModule } from '../../modules/banks.js';
 import { bankAccountsModule } from '../../modules/bank-accounts.js';
 import { migrationModule } from '../../modules/migration.js';
+import { categoriesModule } from '../../modules/categories.js';
 
 // Map of routes to modules
 const routes = {
@@ -31,7 +31,8 @@ const routes = {
     'expense': expenseModule,
     'statements': statementsModule,
     'reports': reportsModule,
-    'migration': migrationModule
+    'migration': migrationModule,
+    'categories': categoriesModule
 };
 
 // Módulos que requieren autenticación
@@ -46,16 +47,36 @@ const protectedRoutes = [
     'banks',
     'bank-accounts',
     'companies',
-    'users'
+    'users',
+    'migration',
+    'categories'
 ];
 
 // Módulos que solo super_admin puede ver
-const superAdminRoutes = ['companies', 'users', 'banks', 'accounts', 'bank-accounts'];
+const superAdminRoutes = [
+    'companies',
+    'users',
+    'banks',
+    'accounts',
+    'bank-accounts',
+    'currencies',
+    'exchange-rates',
+    'migration',
+    'categories'
+];
 
-// Elementos del DOM
+// Después de definir routes
+console.log('=== RUTAS REGISTRADAS ===');
+Object.keys(routes).forEach(route => {
+    console.log('-', route, ':', !!routes[route]);
+});
+console.log('========================');
+
+// ✅ DECLARAR VARIABLES GLOBALES DEL MÓDULO
 let loginModal, registerModal;
 let publicMenu, privateMenu;
 let publicNavbar, privateNavbar;
+let previousRoute = null;  // ← Declarada aquí, antes de usarla
 
 // ============================================
 // FUNCIONES DE AUTENTICACIÓN Y PERMISOS
@@ -137,7 +158,7 @@ function loadAllCompanies() {
         return;
     }
 
-    
+
     // ✅ Cambiar false por true (requiere autenticación)
     api.get('api/companies', true).then(response => {
         if (response.success && response.data) {
@@ -520,37 +541,60 @@ async function loadRoute(route) {
     const contentDiv = document.getElementById('app-content');
     const module = routes[route];
 
-    if (module) {
-        await module.render(contentDiv);
+    console.log('Cargando ruta:', route);
+    console.log('Módulo encontrado:', !!module);
 
-        const navTitle = document.getElementById('page-title');
-        if (navTitle) {
-            const titles = {
-                dashboard: 'Dashboard',
-                companies: 'Empresas',
-                users: 'Usuarios',
-                accounts: 'Cuentas Contables',
-                currencies: 'Monedas',
-                'exchange-rates': 'Tasas de Cambio',
-                banks: 'Bancos',
-                'bank-accounts': 'Cuentas Bancarias',
-                income: 'Ingresos',
-                expense: 'Egresos',
-                statements: 'Carga Masiva',
-                reports: 'Reportes',
-                login: 'Iniciar Sesión'
-            };
-            navTitle.innerText = titles[route] || route;
+    if (module) {
+        // ✅ Limpiar módulo anterior
+        if (previousRoute && routes[previousRoute]) {
+            // Si el módulo tiene método cleanup, llamarlo
+            if (typeof routes[previousRoute].cleanup === 'function') {
+                console.log('Limpiando módulo anterior:', previousRoute);
+                routes[previousRoute].cleanup();
+            }
         }
 
-        setTimeout(() => {
-            document.querySelectorAll('.sidebar .nav-link').forEach(link => {
-                link.classList.remove('active');
-                if (link.getAttribute('href') === `#${route}`) {
-                    link.classList.add('active');
-                }
-            });
-        }, 100);
+        try {
+            await module.render(contentDiv);
+            previousRoute = route;
+
+            // Actualizar título
+            const navTitle = document.getElementById('page-title');
+            if (navTitle) {
+                const titles = {
+                    dashboard: 'Dashboard',
+                    companies: 'Empresas',
+                    users: 'Usuarios',
+                    accounts: 'Cuentas Contables',
+                    currencies: 'Monedas',
+                    'exchange-rates': 'Tasas de Cambio',
+                    banks: 'Bancos',
+                    'bank-accounts': 'Cuentas Bancarias',
+                    income: 'Ingresos',
+                    expense: 'Egresos',
+                    statements: 'Carga Masiva',
+                    reports: 'Reportes',
+                    login: 'Iniciar Sesión',
+                    migration: 'Migración de Datos',
+                    categories: 'Categorías'
+                };
+                navTitle.innerText = titles[route] || route;
+            }
+
+            // Actualizar clase active en el sidebar
+            setTimeout(() => {
+                document.querySelectorAll('.sidebar .nav-link').forEach(link => {
+                    link.classList.remove('active');
+                    if (link.getAttribute('href') === `#${route}`) {
+                        link.classList.add('active');
+                    }
+                });
+            }, 100);
+
+        } catch (error) {
+            console.error('Error renderizando módulo:', error);
+            contentDiv.innerHTML = `<div class="alert alert-danger">Error al cargar el módulo: ${error.message}</div>`;
+        }
     } else {
         contentDiv.innerHTML = '<div class="alert alert-danger">Módulo no encontrado</div>';
     }
@@ -566,11 +610,23 @@ function updateFooterInfo() {
 
 // Manejar cambio de hash (incluye verificación de autenticación)
 async function handleHashChange() {
-    // ✅ LLAMAR A checkAuth() AQUÍ
+    console.log('Hash change detected:', window.location.hash);
+
     if (!checkAuth()) return;
 
     const hash = window.location.hash.substring(1) || 'dashboard';
-    await loadRoute(hash);
+    console.log('Loading route:', hash);
+
+    try {
+        await loadRoute(hash);
+    } catch (error) {
+        console.error('Error loading route:', error);
+        showAlert('Error al cargar el módulo: ' + error.message, 'danger');
+        // Intentar cargar dashboard como fallback
+        if (hash !== 'dashboard') {
+            window.location.hash = 'dashboard';
+        }
+    }
 }
 
 // ============================================
@@ -634,3 +690,10 @@ async function initApp() {
 
 // Iniciar la aplicación
 initApp();
+
+// Al final de main.js, después de initApp()
+// Exponer módulos disponibles para debugging
+window.availableModules = Object.keys(routes);
+window.currentRoute = () => window.location.hash.substring(1) || 'dashboard';
+
+console.log('Módulos disponibles:', window.availableModules);

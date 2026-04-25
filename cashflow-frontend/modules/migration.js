@@ -3,6 +3,8 @@ import { api } from '../services/apiService.js';
 import { accountService } from '../services/accountService.js';
 import { formatAmountWithDecimals, formatCurrency, formatDate, showAlert } from '../utils/helpers.js';
 
+// modules/migration.js
+
 export const migrationModule = {
     connections: [],
     currentSessionId: null,
@@ -10,6 +12,7 @@ export const migrationModule = {
     transactionMappings: {},
     incomeAccounts: [],
     expenseAccounts: [],
+    currentConnectionId: null,  // ← NUEVO: almacenar conexión actual
 
     async render(container) {
         await this.loadConnections();
@@ -47,13 +50,14 @@ export const migrationModule = {
                         <div class="col-md-4">
                             <label class="form-label fw-semibold">Conexión</label>
                             <select class="form-select" id="connectionSelect">
-                                ${this.connections.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                                <option value="">Seleccione una conexión</option>
+                                ${this.connections.map(c => `<option value="${c.id}">${c.name} (${c.company_name || 'Mi empresa'})</option>`).join('')}
                             </select>
                         </div>
                         <div class="col-md-3">
                             <label class="form-label fw-semibold">Año</label>
-                            <select class="form-select" id="yearSelect">
-                                <option value="">Seleccione año</option>
+                            <select class="form-select" id="yearSelect" disabled>
+                                <option value="">Primero seleccione conexión</option>
                             </select>
                         </div>
                         <div class="col-md-3">
@@ -63,7 +67,7 @@ export const migrationModule = {
                             </select>
                         </div>
                         <div class="col-md-2 d-flex align-items-end">
-                            <button class="btn btn-primary w-100" id="previewBtn">
+                            <button class="btn btn-primary w-100" id="previewBtn" disabled>
                                 <i class="bi bi-eye"></i> Previsualizar
                             </button>
                         </div>
@@ -77,7 +81,6 @@ export const migrationModule = {
                     <h5 class="mb-0"><i class="bi bi-table"></i> Previsualización y Mapeo</h5>
                 </div>
                 <div class="card-body">
-                    <!-- Barra de progreso -->
                     <div class="mb-3">
                         <div class="d-flex justify-content-between">
                             <span>Progreso de mapeo:</span>
@@ -87,10 +90,7 @@ export const migrationModule = {
                             <div id="mappingProgress" class="progress-bar bg-info" style="width: 0%">0%</div>
                         </div>
                     </div>
-                    
-                    <!-- Tabla de transacciones -->
                     <div id="previewTable"></div>
-                    
                     <div class="mt-3 d-flex justify-content-end gap-2">
                         <button class="btn btn-secondary" id="cancelMigrationBtn">
                             <i class="bi bi-x-circle"></i> Cancelar
@@ -119,6 +119,7 @@ export const migrationModule = {
                             <div class="card-body">
                                 <h6 class="card-title">
                                     <i class="bi bi-server"></i> ${conn.name}
+                                    ${conn.company_name ? `<span class="badge bg-secondary ms-2">${conn.company_name}</span>` : ''}
                                 </h6>
                                 <p class="card-text small text-muted">
                                     Host: ${conn.host}:${conn.port}<br>
@@ -147,6 +148,7 @@ export const migrationModule = {
             const response = await api.get('api/migrations/connections');
             if (response.success && response.data) {
                 this.connections = response.data;
+                console.log('Conexiones cargadas:', this.connections.length);
             }
         } catch (error) {
             console.error('Error loading connections:', error);
@@ -172,10 +174,14 @@ export const migrationModule = {
     async testConnection(connectionId) {
         try {
             showAlert('Probando conexión...', 'info');
-            // Implementar test de conexión
-            showAlert('Conexión exitosa', 'success');
+            const response = await api.get(`api/migrations/test-connection?connection_id=${connectionId}`);
+            if (response.success && response.data.success) {
+                showAlert('Conexión exitosa: ' + response.data.message, 'success');
+            } else {
+                showAlert('Error de conexión: ' + (response.data?.message || 'Desconocido'), 'danger');
+            }
         } catch (error) {
-            showAlert('Error de conexión', 'danger');
+            showAlert('Error al probar la conexión', 'danger');
         }
     },
 
@@ -183,8 +189,33 @@ export const migrationModule = {
         const connection = this.connections.find(c => c.id == connectionId);
         if (!connection) return;
 
+        this.currentConnectionId = connectionId;
+
         // Mostrar panel de migración
-        document.getElementById('migrationPanel').style.display = 'block';
+        const migrationPanel = document.getElementById('migrationPanel');
+        if (migrationPanel) migrationPanel.style.display = 'block';
+
+        // Configurar selector de conexión
+        const connectionSelect = document.getElementById('connectionSelect');
+        if (connectionSelect) {
+            connectionSelect.value = connectionId;
+            connectionSelect.disabled = false;
+        }
+
+        // ✅ Limpiar selects de año y mes
+        const yearSelect = document.getElementById('yearSelect');
+        const monthSelect = document.getElementById('monthSelect');
+        const previewBtn = document.getElementById('previewBtn');
+
+        if (yearSelect) {
+            yearSelect.innerHTML = '<option value="">Cargando años...</option>';
+            yearSelect.disabled = true;
+        }
+        if (monthSelect) {
+            monthSelect.innerHTML = '<option value="">Primero seleccione año</option>';
+            monthSelect.disabled = true;
+        }
+        if (previewBtn) previewBtn.disabled = true;
 
         // Cargar años disponibles
         await this.loadAvailableYears(connectionId);
@@ -193,32 +224,73 @@ export const migrationModule = {
     async loadAvailableYears(connectionId) {
         try {
             const response = await api.get(`api/migrations/years?connection_id=${connectionId}`);
-            if (response.success && response.data) {
-                const yearSelect = document.getElementById('yearSelect');
-                yearSelect.innerHTML = '<option value="">Seleccione año</option>' +
-                    response.data.years.map(y => `<option value="${y}">${y}</option>`).join('');
 
-                yearSelect.dataset.connectionId = connectionId;
+            const yearSelect = document.getElementById('yearSelect');
+            if (response.success && response.data && response.data.years) {
+                const years = response.data.years;
+
+                if (years.length === 0) {
+                    yearSelect.innerHTML = '<option value="">No hay años disponibles</option>';
+                    yearSelect.disabled = true;
+                    showAlert('No se encontraron datos en la base de datos externa', 'warning');
+                } else {
+                    yearSelect.innerHTML = '<option value="">Seleccione año</option>' +
+                        years.map(y => `<option value="${y}">${y}</option>`).join('');
+                    yearSelect.disabled = false;
+
+                    // ✅ Guardar el connectionId en el dataset para usarlo después
+                    yearSelect.dataset.connectionId = connectionId;
+                }
+            } else {
+                yearSelect.innerHTML = '<option value="">Error al cargar años</option>';
+                yearSelect.disabled = true;
             }
         } catch (error) {
             console.error('Error loading years:', error);
+            const yearSelect = document.getElementById('yearSelect');
+            if (yearSelect) {
+                yearSelect.innerHTML = '<option value="">Error al cargar años</option>';
+                yearSelect.disabled = true;
+            }
+            showAlert('Error al cargar los años disponibles', 'danger');
         }
     },
 
     async loadAvailableMonths(connectionId, year) {
         try {
             const response = await api.get(`api/migrations/months?connection_id=${connectionId}&year=${year}`);
-            if (response.success && response.data) {
-                const monthSelect = document.getElementById('monthSelect');
-                const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-                    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-                monthSelect.innerHTML = '<option value="">Seleccione mes</option>' +
-                    response.data.months.map(m => `<option value="${m}">${months[m - 1]}</option>`).join('');
-                monthSelect.disabled = false;
+            const monthSelect = document.getElementById('monthSelect');
+            const previewBtn = document.getElementById('previewBtn');
+            const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+            if (response.success && response.data && response.data.months) {
+                const monthsList = response.data.months;
+
+                if (monthsList.length === 0) {
+                    monthSelect.innerHTML = '<option value="">No hay meses disponibles</option>';
+                    monthSelect.disabled = true;
+                    if (previewBtn) previewBtn.disabled = true;
+                } else {
+                    monthSelect.innerHTML = '<option value="">Seleccione mes</option>' +
+                        monthsList.map(m => `<option value="${m}">${months[m - 1]}</option>`).join('');
+                    monthSelect.disabled = false;
+                    if (previewBtn) previewBtn.disabled = true; // Hasta que seleccione mes
+                }
+            } else {
+                monthSelect.innerHTML = '<option value="">Error al cargar meses</option>';
+                monthSelect.disabled = true;
+                if (previewBtn) previewBtn.disabled = true;
             }
         } catch (error) {
             console.error('Error loading months:', error);
+            const monthSelect = document.getElementById('monthSelect');
+            if (monthSelect) {
+                monthSelect.innerHTML = '<option value="">Error al cargar meses</option>';
+                monthSelect.disabled = true;
+            }
+            showAlert('Error al cargar los meses disponibles', 'danger');
         }
     },
 
@@ -251,6 +323,8 @@ export const migrationModule = {
                 this.renderPreviewTable();
                 document.getElementById('mappingPanel').style.display = 'block';
                 showAlert(`${response.data.total_transactions} transacciones encontradas`, 'success');
+            } else {
+                showAlert(response.message || 'Error al previsualizar datos', 'danger');
             }
         } catch (error) {
             console.error('Error previewing:', error);
@@ -302,9 +376,9 @@ export const migrationModule = {
                 <tr>
                     <td>${transaction.date}</td>
                     <td>${transaction.reference || '-'}</td>
-                    <td>${transaction.description.substring(0, 80)}</td>
+                    <td title="${transaction.description}">${transaction.description.substring(0, 80)}${transaction.description.length > 80 ? '...' : ''}</td>
                     <td class="${transaction.transaction_type === 'income' ? 'text-success' : 'text-danger'}">
-                        ${formattedAmount}
+                        ${ formattedAmount }
                     </td>
                     <td>
                         <span class="badge ${transaction.transaction_type === 'income' ? 'bg-success' : 'bg-danger'}">
@@ -417,6 +491,8 @@ export const migrationModule = {
                 this.currentSessionId = null;
                 this.previewData = [];
                 this.transactionMappings = {};
+            } else {
+                showAlert(response.message || 'Error al ejecutar la migración', 'danger');
             }
         } catch (error) {
             console.error('Error executing migration:', error);
@@ -428,7 +504,7 @@ export const migrationModule = {
     },
 
     setupEventListeners() {
-        // Eventos dinámicos
+        // Eventos dinámicos para botones de conexión
         document.addEventListener('click', (e) => {
             if (e.target.closest('.test-connection')) {
                 const btn = e.target.closest('.test-connection');
@@ -438,17 +514,72 @@ export const migrationModule = {
                 const btn = e.target.closest('.use-connection');
                 this.useConnection(btn.dataset.id);
             }
+            if (e.target.closest('.delete-connection')) {
+                const btn = e.target.closest('.delete-connection');
+                this.deleteConnection(btn.dataset.id);
+            }
             if (e.target.closest('#addConnectionLink') || e.target.closest('#addConnectionBtn')) {
                 this.showConnectionModal();
             }
         });
 
-        // Eventos de selects
+        // ✅ EVENTO PARA CUANDO CAMBIA EL AÑO
         const yearSelect = document.getElementById('yearSelect');
         if (yearSelect) {
             yearSelect.addEventListener('change', (e) => {
                 const connectionId = yearSelect.dataset.connectionId;
-                this.loadAvailableMonths(connectionId, e.target.value);
+                const year = e.target.value;
+
+                if (connectionId && year) {
+                    this.loadAvailableMonths(connectionId, year);
+                } else {
+                    const monthSelect = document.getElementById('monthSelect');
+                    if (monthSelect) {
+                        monthSelect.innerHTML = '<option value="">Primero seleccione año</option>';
+                        monthSelect.disabled = true;
+                    }
+                    const previewBtn = document.getElementById('previewBtn');
+                    if (previewBtn) previewBtn.disabled = true;
+                }
+            });
+        }
+
+        // ✅ EVENTO PARA CUANDO CAMBIA EL MES
+        const monthSelect = document.getElementById('monthSelect');
+        if (monthSelect) {
+            monthSelect.addEventListener('change', (e) => {
+                const previewBtn = document.getElementById('previewBtn');
+                if (previewBtn) {
+                    previewBtn.disabled = !e.target.value;
+                }
+            });
+        }
+
+        // ✅ EVENTO PARA CUANDO CAMBIA LA CONEXIÓN EN EL SELECTOR
+        const connectionSelect = document.getElementById('connectionSelect');
+        if (connectionSelect) {
+            connectionSelect.addEventListener('change', async (e) => {
+                const connectionId = e.target.value;
+                if (connectionId) {
+                    this.currentConnectionId = connectionId;
+
+                    // Limpiar selects
+                    const yearSelectEl = document.getElementById('yearSelect');
+                    const monthSelectEl = document.getElementById('monthSelect');
+                    const previewBtn = document.getElementById('previewBtn');
+
+                    if (yearSelectEl) {
+                        yearSelectEl.innerHTML = '<option value="">Cargando años...</option>';
+                        yearSelectEl.disabled = true;
+                    }
+                    if (monthSelectEl) {
+                        monthSelectEl.innerHTML = '<option value="">Primero seleccione año</option>';
+                        monthSelectEl.disabled = true;
+                    }
+                    if (previewBtn) previewBtn.disabled = true;
+
+                    await this.loadAvailableYears(connectionId);
+                }
             });
         }
 
@@ -476,9 +607,36 @@ export const migrationModule = {
         }
     },
 
+    async deleteConnection(connectionId) {
+        if (!confirm('¿Está seguro de eliminar esta conexión? Esta acción no se puede deshacer.')) {
+            return;
+        }
+
+        try {
+            const response = await api.delete(`api/migrations/connections/${connectionId}`);
+            if (response.success) {
+                showAlert('Conexión eliminada exitosamente', 'success');
+                await this.loadConnections();
+
+                // Recargar la lista de conexiones
+                const connectionsList = document.getElementById('connectionsList');
+                if (connectionsList) {
+                    connectionsList.innerHTML = this.renderConnectionsList();
+                }
+
+                // Si el panel de migración estaba abierto, cerrarlo
+                document.getElementById('migrationPanel').style.display = 'none';
+                document.getElementById('mappingPanel').style.display = 'none';
+            } else {
+                showAlert(response.message || 'Error al eliminar la conexión', 'danger');
+            }
+        } catch (error) {
+            console.error('Error deleting connection:', error);
+            showAlert('Error al eliminar la conexión', 'danger');
+        }
+    },
+
     showConnectionModal() {
-        // Implementar modal para crear nueva conexión
-        // (similar al modal de creación de bancos)
         showAlert('Funcionalidad de crear conexión en desarrollo', 'info');
     }
 };

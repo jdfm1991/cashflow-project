@@ -87,4 +87,20 @@ class ExternalConnection extends BaseModel
             return ['success' => false, 'message' => $e->getMessage()];
         }
     }
+
+    /**
+     * Obtener todas las conexiones (para super_admin)
+     */
+    public function getAll(): array
+    {
+        $sql = "SELECT ec.*, c.name as company_name 
+            FROM {$this->table} ec
+            LEFT JOIN companies c ON ec.company_id = c.id
+            ORDER BY c.name, ec.name ASC";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute();
+
+        return $stmt->fetchAll();
+    }
 }

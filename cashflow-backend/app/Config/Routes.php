@@ -331,6 +331,60 @@ return [
     ],
 
     // ============================================
+    // RUTAS DE CATEGORÍAS
+    // ============================================
+
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/categories$#',
+        'controller' => 'App\\Controllers\\CategoryController',
+        'action' => 'index',
+        'middleware' => ['AuthMiddleware']
+    ],
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/categories/income$#',
+        'controller' => 'App\\Controllers\\CategoryController',
+        'action' => 'getIncomeCategories',
+        'middleware' => ['AuthMiddleware']
+    ],
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/categories/expense$#',
+        'controller' => 'App\\Controllers\\CategoryController',
+        'action' => 'getExpenseCategories',
+        'middleware' => ['AuthMiddleware']
+    ],
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/categories/(\d+)$#',
+        'controller' => 'App\\Controllers\\CategoryController',
+        'action' => 'show',
+        'middleware' => ['AuthMiddleware']
+    ],
+    [
+        'method' => 'POST',
+        'pattern' => '#^api/categories$#',
+        'controller' => 'App\\Controllers\\CategoryController',
+        'action' => 'store',
+        'middleware' => ['AuthMiddleware']
+    ],
+    [
+        'method' => 'PUT',
+        'pattern' => '#^api/categories/(\d+)$#',
+        'controller' => 'App\\Controllers\\CategoryController',
+        'action' => 'update',
+        'middleware' => ['AuthMiddleware']
+    ],
+    [
+        'method' => 'DELETE',
+        'pattern' => '#^api/categories/(\d+)$#',
+        'controller' => 'App\\Controllers\\CategoryController',
+        'action' => 'destroy',
+        'middleware' => ['AuthMiddleware']
+    ],
+    
+    // ============================================
     // RUTAS DE CUENTAS
     // ============================================
 
