@@ -15,14 +15,14 @@ class BankAccountController
     private BankAccount $bankAccountModel;
     private Bank $bankModel;
     private Currency $currencyModel;
-    
+
     public function __construct()
     {
         $this->bankAccountModel = new BankAccount();
         $this->bankModel = new Bank();
         $this->currencyModel = new Currency();
     }
-    
+
     /**
      * GET /api/bank-accounts
      * Listar cuentas bancarias de la empresa
@@ -30,12 +30,12 @@ class BankAccountController
     public function index(): void
     {
         $companyId = $this->getCompanyId();
-        
+
         $accounts = $this->bankAccountModel->getByCompany($companyId);
-        
+
         Response::success($accounts);
     }
-    
+
     /**
      * GET /api/bank-accounts/{id}
      * Obtener cuenta bancaria específica
@@ -44,20 +44,20 @@ class BankAccountController
     {
         $companyId = $this->getCompanyId();
         $account = $this->bankAccountModel->find($id);
-        
+
         if (!$account) {
             Response::notFound('Cuenta bancaria no encontrada');
             return;
         }
-        
+
         if ($account['company_id'] != $companyId) {
             Response::forbidden('No autorizado');
             return;
         }
-        
+
         Response::success($account);
     }
-    
+
     /**
      * POST /api/bank-accounts
      * Crear nueva cuenta bancaria para la empresa
@@ -65,15 +65,15 @@ class BankAccountController
     public function store(): void
     {
         $companyId = $this->getCompanyId();
-        
+
         $rawInput = file_get_contents('php://input');
         $data = json_decode($rawInput, true);
-        
+
         if (empty($data)) {
             Response::error('No se recibieron datos', 400);
             return;
         }
-        
+
         $validator = new Validator($data);
         $validator->required('bank_id');
         $validator->numeric('bank_id');
@@ -87,33 +87,33 @@ class BankAccountController
         $validator->optional('opening_balance');
         $validator->numeric('opening_balance');
         $validator->min('opening_balance', 0);
-        
+
         if (!$validator->passes()) {
             Response::validationError($validator->errors());
             return;
         }
-        
+
         // Verificar que el banco existe
         $bank = $this->bankModel->find($data['bank_id']);
         if (!$bank) {
             Response::validationError(['bank_id' => 'El banco no existe']);
             return;
         }
-        
+
         // Verificar que la moneda existe
         $currency = $this->currencyModel->find($data['currency_id']);
         if (!$currency) {
             Response::validationError(['currency_id' => 'La moneda no es válida']);
             return;
         }
-        
+
         // Verificar que el número de cuenta no esté duplicado en la misma empresa
         $existing = $this->bankAccountModel->findByAccountNumber($data['account_number'], $companyId);
         if ($existing) {
             Response::conflict('El número de cuenta ya está registrado para esta empresa');
             return;
         }
-        
+
         $accountData = [
             'company_id' => $companyId,
             'bank_id' => $data['bank_id'],
@@ -125,16 +125,16 @@ class BankAccountController
             'current_balance' => $data['opening_balance'] ?? 0,
             'is_active' => true
         ];
-        
+
         $account = $this->bankAccountModel->create($accountData);
-        
+
         if ($account) {
             Response::success($account, 'Cuenta bancaria creada exitosamente', 201);
         } else {
             Response::error('Error al crear la cuenta bancaria', 500);
         }
     }
-    
+
     /**
      * PUT /api/bank-accounts/{id}
      * Actualizar cuenta bancaria
@@ -142,39 +142,44 @@ class BankAccountController
     public function update(int $id): void
     {
         $companyId = $this->getCompanyId();
-        
+
         $account = $this->bankAccountModel->find($id);
-        
+
         if (!$account) {
             Response::notFound('Cuenta bancaria no encontrada');
             return;
         }
-        
+
         if ($account['company_id'] != $companyId) {
             Response::forbidden('No autorizado');
             return;
         }
-        
+
         $rawInput = file_get_contents('php://input');
         $data = json_decode($rawInput, true);
-        
+
         if (empty($data)) {
             Response::error('No se recibieron datos', 400);
             return;
         }
-        
+
         $allowedFields = [
-            'account_number', 'account_type', 'currency_id', 
-            'account_holder', 'is_active'
+            'account_number',
+            'account_type',
+            'currency_id',
+            'account_holder',
+            'is_active',
+            'opening_balance',
+            'current_balance'
         ];
-        
+
         $updateData = array_intersect_key($data, array_flip($allowedFields));
-        
+
         if (empty($updateData)) {
             Response::error('No hay campos válidos para actualizar', 400);
             return;
         }
-        
+
         // Si se cambia el número de cuenta, verificar duplicado
         if (isset($updateData['account_number']) && $updateData['account_number'] !== $account['account_number']) {
             $existing = $this->bankAccountModel->findByAccountNumber($updateData['account_number'], $companyId);
@@ -183,16 +188,23 @@ class BankAccountController
                 return;
             }
         }
-        
+
+        // Si se actualiza el opening_balance, ajustar también el current_balance
+        if (isset($updateData['opening_balance'])) {
+            // Calcular la diferencia
+            $difference = $updateData['opening_balance'] - $account['opening_balance'];
+            $updateData['current_balance'] = $account['current_balance'] + $difference;
+        }
+
         $updated = $this->bankAccountModel->update($id, $updateData);
-        
+
         if ($updated) {
             Response::success($updated, 'Cuenta bancaria actualizada exitosamente');
         } else {
             Response::error('Error al actualizar la cuenta bancaria', 500);
         }
     }
-    
+
     /**
      * DELETE /api/bank-accounts/{id}
      * Eliminar cuenta bancaria
@@ -200,38 +212,38 @@ class BankAccountController
     public function destroy(int $id): void
     {
         $companyId = $this->getCompanyId();
-        
+
         $account = $this->bankAccountModel->find($id);
-        
+
         if (!$account) {
             Response::notFound('Cuenta bancaria no encontrada');
             return;
         }
-        
+
         if ($account['company_id'] != $companyId) {
             Response::forbidden('No autorizado');
             return;
         }
-        
+
         // Usar los métodos de los modelos que extienden de Transaction
         $incomeModel = new \App\Models\Income();
         $expenseModel = new \App\Models\Expense();
-        
+
         $incomeCount = $incomeModel->countByBankAccountAndCompany($companyId, $id);
         $expenseCount = $expenseModel->countByBankAccountAndCompany($companyId, $id);
-        
+
         if ($incomeCount > 0 || $expenseCount > 0) {
             Response::error('No se puede eliminar la cuenta bancaria porque tiene transacciones asociadas', 400);
             return;
         }
-        
+
         if ($this->bankAccountModel->delete($id)) {
             Response::success(null, 'Cuenta bancaria eliminada exitosamente');
         } else {
             Response::error('Error al eliminar la cuenta bancaria', 500);
         }
     }
-    
+
     /**
      * Obtener company_id del usuario autenticado
      */
@@ -241,11 +253,11 @@ class BankAccountController
         if (isset($_REQUEST['company_id']) && !empty($_REQUEST['company_id'])) {
             return (int) $_REQUEST['company_id'];
         }
-        
+
         // Intentar extraer del token JWT
         $headers = getallheaders();
         $authHeader = $headers['Authorization'] ?? '';
-        
+
         if (preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
             try {
                 $jwtService = new \App\Services\JWTService();
@@ -257,7 +269,7 @@ class BankAccountController
                 // Error al validar token
             }
         }
-        
+
         // Si no se encuentra, obtener del usuario autenticado
         $userId = $this->getUserId();
         if ($userId > 0) {
@@ -267,10 +279,10 @@ class BankAccountController
                 return (int) $user['company_id'];
             }
         }
-        
+
         return 0;
     }
-    
+
     /**
      * Obtener ID de usuario autenticado
      */
@@ -280,21 +292,21 @@ class BankAccountController
         if (isset($_REQUEST['user_id']) && !empty($_REQUEST['user_id'])) {
             return (int) $_REQUEST['user_id'];
         }
-        
+
         // Buscar en $_POST
         if (isset($_POST['user_id']) && !empty($_POST['user_id'])) {
             return (int) $_POST['user_id'];
         }
-        
+
         // Buscar en $_GET
         if (isset($_GET['user_id']) && !empty($_GET['user_id'])) {
             return (int) $_GET['user_id'];
         }
-        
+
         // Intentar extraer del token JWT
         $headers = getallheaders();
         $authHeader = $headers['Authorization'] ?? '';
-        
+
         if (preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
             try {
                 $jwtService = new \App\Services\JWTService();
@@ -306,7 +318,7 @@ class BankAccountController
                 // Error al validar token
             }
         }
-        
+
         return 0;
     }
 }

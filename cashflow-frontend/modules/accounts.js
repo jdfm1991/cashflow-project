@@ -1,12 +1,20 @@
+// modules/accounts.js
 import { accountService } from '../services/accountService.js';
+import { api } from '../services/apiService.js';
 import { formatCurrency, showAlert } from '../utils/helpers.js';
 
 export const accountsModule = {
     accounts: [],
+    categories: [],           // ← NUEVO: para almacenar categorías
+    incomeCategories: [],     // ← NUEVO: categorías de ingresos
+    expenseCategories: [],    // ← NUEVO: categorías de egresos
     dataTable: null,
     currentType: 'income',
 
     async render(container) {
+        // Cargar categorías antes de renderizar
+        await this.loadCategories();
+        
         container.innerHTML = `
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h1 class="h3">Gestión de Cuentas</h1>
@@ -58,6 +66,26 @@ export const accountsModule = {
         await this.loadAccounts();
     },
 
+    /**
+     * Cargar categorías desde la base de datos
+     */
+    async loadCategories() {
+        try {
+            const response = await api.get('api/categories');
+            if (response.success && response.data) {
+                this.categories = response.data;
+                this.incomeCategories = this.categories.filter(c => c.type === 'income');
+                this.expenseCategories = this.categories.filter(c => c.type === 'expense');
+                console.log('Categorías cargadas:', this.categories.length);
+                console.log('Ingresos:', this.incomeCategories.length);
+                console.log('Egresos:', this.expenseCategories.length);
+            }
+        } catch (error) {
+            console.error('Error loading categories:', error);
+            showAlert('Error al cargar las categorías', 'danger');
+        }
+    },
+
     async loadAccounts() {
         const container = document.getElementById('accountsTableBody');
 
@@ -77,19 +105,17 @@ export const accountsModule = {
     },
 
     renderDataTable() {
-        // Destruir tabla existente si ya está inicializada
         if (this.dataTable) {
             this.dataTable.destroy();
         }
 
-        // Preparar datos para DataTables
         const tableData = this.accounts.map(account => [
             account.id,
             account.name,
             `<span class="badge ${account.type === 'income' ? 'bg-success' : 'bg-danger'}">
-            ${account.type === 'income' ? 'Ingreso' : 'Egreso'}
-        </span>`,
-            this.getCategoryLabel(account.category),
+                ${account.type === 'income' ? 'Ingreso' : 'Egreso'}
+            </span>`,
+            this.getCategoryDisplayName(account.category),  // ← Usar método dinámico
             account.description || '-',
             `
             <div class="form-check form-switch">
@@ -99,7 +125,7 @@ export const accountsModule = {
                        role="switch"
                        id="toggle_${account.id}">
             </div>
-        `,
+            `,
             `
             <div class="btn-group btn-group-sm">
                 <button class="btn btn-outline-primary edit-account" data-id="${account.id}" title="Editar">
@@ -109,10 +135,9 @@ export const accountsModule = {
                     <i class="bi bi-trash"></i>
                 </button>
             </div>
-        `
+            `
         ]);
 
-        // Inicializar DataTables
         this.dataTable = $('#accountsTable').DataTable({
             data: tableData,
             language: {
@@ -123,36 +148,16 @@ export const accountsModule = {
             order: [[1, 'asc']],
             columnDefs: [
                 { targets: 0, visible: false },
-                { targets: 5, orderable: false, searchable: false }, // Columna estado
-                { targets: 6, orderable: false, searchable: false }  // Columna acciones
+                { targets: 5, orderable: false, searchable: false },
+                { targets: 6, orderable: false, searchable: false }
             ],
             dom: 'Bfrtip',
             buttons: [
-                {
-                    extend: 'copy',
-                    text: '<i class="bi bi-files"></i> Copiar',
-                    className: 'btn btn-sm btn-secondary'
-                },
-                {
-                    extend: 'csv',
-                    text: '<i class="bi bi-filetype-csv"></i> CSV',
-                    className: 'btn btn-sm btn-info'
-                },
-                {
-                    extend: 'excel',
-                    text: '<i class="bi bi-file-excel"></i> Excel',
-                    className: 'btn btn-sm btn-success'
-                },
-                {
-                    extend: 'pdf',
-                    text: '<i class="bi bi-file-pdf"></i> PDF',
-                    className: 'btn btn-sm btn-danger'
-                },
-                {
-                    extend: 'print',
-                    text: '<i class="bi bi-printer"></i> Imprimir',
-                    className: 'btn btn-sm btn-secondary'
-                }
+                { extend: 'copy', text: '<i class="bi bi-files"></i> Copiar', className: 'btn btn-sm btn-secondary' },
+                { extend: 'csv', text: '<i class="bi bi-filetype-csv"></i> CSV', className: 'btn btn-sm btn-info' },
+                { extend: 'excel', text: '<i class="bi bi-file-excel"></i> Excel', className: 'btn btn-sm btn-success' },
+                { extend: 'pdf', text: '<i class="bi bi-file-pdf"></i> PDF', className: 'btn btn-sm btn-danger' },
+                { extend: 'print', text: '<i class="bi bi-printer"></i> Imprimir', className: 'btn btn-sm btn-secondary' }
             ],
             drawCallback: () => {
                 this.attachTableEvents();
@@ -165,11 +170,42 @@ export const accountsModule = {
     },
 
     /**
-     * Adjuntar eventos de toggle de estado
+     * Obtener el nombre de la categoría desde los datos cargados
      */
+    getCategoryDisplayName(categoryKey) {
+        if (!categoryKey) return '-';
+        
+        // Buscar en todas las categorías
+        const found = this.categories.find(c => c.name === categoryKey || c.id == categoryKey);
+        if (found) {
+            // Si la categoría tiene icono, mostrarlo
+            const icon = found.icon ? `<i class="${found.icon} me-1"></i>` : '';
+            return `${icon}${found.name}`;
+        }
+        
+        // Si no se encuentra, mostrar el valor original
+        return categoryKey;
+    },
+
+    /**
+     * Obtener las opciones de categoría para el select (dinámico)
+     */
+    getCategoryOptions(type, selected = '') {
+        const categories = type === 'income' ? this.incomeCategories : this.expenseCategories;
+        
+        if (categories.length === 0) {
+            return '<option value="">Cargando categorías...</option>';
+        }
+        
+        return categories.map(cat => {
+            const icon = cat.icon ? `<i class="${cat.icon} me-1"></i>` : '';
+            const isSelected = (selected === cat.name || selected == cat.id) ? 'selected' : '';
+            return `<option value="${cat.name}" ${isSelected}>${icon}${cat.name}</option>`;
+        }).join('');
+    },
+
     attachStatusToggleEvents() {
         document.querySelectorAll('.toggle-status').forEach(toggle => {
-            // Remover event listeners anteriores para evitar duplicados
             const newToggle = toggle.cloneNode(true);
             toggle.parentNode.replaceChild(newToggle, toggle);
 
@@ -178,30 +214,20 @@ export const accountsModule = {
 
                 const accountId = parseInt(newToggle.dataset.id);
                 const isActive = newToggle.checked;
-                const statusSpan = newToggle.closest('td').querySelector('.status-text');
 
-                // Mostrar loading en el toggle
                 newToggle.disabled = true;
 
                 try {
                     const response = await accountService.update(accountId, { is_active: isActive });
 
                     if (response.success) {
-                        // Actualizar texto del estado
-                        if (statusSpan) {
-                            statusSpan.textContent = isActive ? 'Activo' : 'Inactivo';
-                            statusSpan.className = `badge ${isActive ? 'bg-success' : 'bg-secondary'} status-text`;
-                        }
-
                         showAlert(`Cuenta ${isActive ? 'activada' : 'desactivada'} exitosamente`, 'success');
-
-                        // Actualizar el estado en el array local
+                        
                         const account = this.accounts.find(a => a.id === accountId);
                         if (account) {
                             account.is_active = isActive;
                         }
                     } else {
-                        // Revertir el toggle si hubo error
                         newToggle.checked = !isActive;
                         showAlert(response.message || 'Error al cambiar el estado', 'danger');
                     }
@@ -217,39 +243,26 @@ export const accountsModule = {
     },
 
     attachTableEvents() {
-        // Eventos de edición
         document.querySelectorAll('.edit-account').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const id = parseInt(btn.dataset.id);
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode.replaceChild(newBtn, btn);
+            
+            newBtn.addEventListener('click', () => {
+                const id = parseInt(newBtn.dataset.id);
                 const account = this.accounts.find(a => a.id === id);
                 if (account) this.showAccountModal(account);
             });
         });
 
-        // Eventos de eliminación
         document.querySelectorAll('.delete-account').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const id = parseInt(btn.dataset.id);
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode.replaceChild(newBtn, btn);
+            
+            newBtn.addEventListener('click', async () => {
+                const id = parseInt(newBtn.dataset.id);
                 await this.deleteAccount(id);
             });
         });
-    },
-
-    getCategoryLabel(category) {
-        const labels = {
-            'ventas': 'Ventas',
-            'alquileres': 'Alquileres',
-            'servicios': 'Servicios',
-            'intereses': 'Intereses',
-            'otros_ingresos': 'Otros Ingresos',
-            'impuestos': 'Impuestos',
-            'nomina': 'Nómina',
-            'honorarios': 'Honorarios',
-            'proveedores': 'Proveedores',
-            'servicios_publicos': 'Servicios Públicos',
-            'otros_egresos': 'Otros Egresos'
-        };
-        return labels[category] || category;
     },
 
     async deleteAccount(id) {
@@ -277,6 +290,13 @@ export const accountsModule = {
     showAccountModal(account = null) {
         const isEditing = !!account;
         const type = account ? account.type : this.currentType;
+
+        // Verificar que las categorías están cargadas
+        const categories = type === 'income' ? this.incomeCategories : this.expenseCategories;
+        if (categories.length === 0) {
+            showAlert('Las categorías aún no se han cargado. Por favor, espere un momento.', 'warning');
+            return;
+        }
 
         const modalHtml = `
             <div class="modal fade" id="accountModal" tabindex="-1">
@@ -312,6 +332,13 @@ export const accountsModule = {
                                     <label class="form-label">Descripción</label>
                                     <textarea class="form-control" id="accountDescription" rows="2">${account ? this.escapeHtml(account.description || '') : ''}</textarea>
                                 </div>
+                                ${isEditing ? `
+                                <div class="mb-3 form-check">
+                                    <input type="checkbox" class="form-check-input" id="accountStatus" 
+                                           ${account.is_active ? 'checked' : ''}>
+                                    <label class="form-check-label" for="accountStatus">Activo</label>
+                                </div>
+                                ` : ''}
                             </form>
                         </div>
                         <div class="modal-footer">
@@ -341,7 +368,6 @@ export const accountsModule = {
             categorySelect.innerHTML = this.getCategoryOptions(newType, '');
         });
 
-        // Guardar cuenta
         const saveBtn = document.getElementById('saveAccountBtn');
         saveBtn.addEventListener('click', async () => {
             const name = document.getElementById('accountName').value.trim();
@@ -354,17 +380,17 @@ export const accountsModule = {
                 return;
             }
 
+            if (!category) {
+                showAlert('Por favor seleccione una categoría', 'warning');
+                return;
+            }
+
             const accountData = { name, type, category, description };
 
-            // Si es edición, incluir el estado
             if (isEditing) {
                 const statusCheckbox = document.getElementById('accountStatus');
                 if (statusCheckbox) {
-                    // ✅ Usar 1 o 0 como número, no como string
                     accountData.is_active = statusCheckbox.checked ? 1 : 0;
-
-                    // Para debugging
-                    console.log('Estado enviado:', accountData.is_active, typeof accountData.is_active);
                 }
             }
 
@@ -382,8 +408,12 @@ export const accountsModule = {
                     if (response.success) showAlert('Cuenta creada exitosamente', 'success');
                 }
 
-                modal.hide();
-                await this.loadAccounts();
+                if (response.success) {
+                    modal.hide();
+                    await this.loadAccounts();
+                } else {
+                    showAlert(response.message || 'Error al guardar la cuenta', 'danger');
+                }
 
             } catch (error) {
                 console.error('Error saving account:', error);
@@ -401,27 +431,32 @@ export const accountsModule = {
         });
     },
 
-    getCategoryOptions(type, selected = '') {
-        const categories = type === 'income'
-            ? [
-                { value: 'ventas', label: 'Ventas' },
-                { value: 'alquileres', label: 'Alquileres' },
-                { value: 'servicios', label: 'Servicios' },
-                { value: 'intereses', label: 'Intereses' },
-                { value: 'otros_ingresos', label: 'Otros Ingresos' }
-            ]
-            : [
-                { value: 'impuestos', label: 'Impuestos' },
-                { value: 'nomina', label: 'Nómina' },
-                { value: 'honorarios', label: 'Honorarios' },
-                { value: 'proveedores', label: 'Proveedores' },
-                { value: 'servicios_publicos', label: 'Servicios Públicos' },
-                { value: 'otros_egresos', label: 'Otros Egresos' }
-            ];
+    setupEventListeners() {
+        const addBtn = document.getElementById('addAccountBtn');
+        if (addBtn) {
+            const newAddBtn = addBtn.cloneNode(true);
+            addBtn.parentNode.replaceChild(newAddBtn, addBtn);
+            newAddBtn.addEventListener('click', () => {
+                if (this.categories.length === 0) {
+                    showAlert('Cargando categorías, por favor espere...', 'warning');
+                    return;
+                }
+                this.showAccountModal();
+            });
+        }
 
-        return categories.map(cat =>
-            `<option value="${cat.value}" ${selected === cat.value ? 'selected' : ''}>${cat.label}</option>`
-        ).join('');
+        const tabs = document.querySelectorAll('#accountTabs .nav-link');
+        tabs.forEach(tab => {
+            const newTab = tab.cloneNode(true);
+            tab.parentNode.replaceChild(newTab, tab);
+            
+            newTab.addEventListener('click', async () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                newTab.classList.add('active');
+                this.currentType = newTab.dataset.type;
+                await this.loadAccounts();
+            });
+        });
     },
 
     escapeHtml(text) {
@@ -431,22 +466,15 @@ export const accountsModule = {
         return div.innerHTML;
     },
 
-    setupEventListeners() {
-        // Botón agregar cuenta
-        const addBtn = document.getElementById('addAccountBtn');
-        if (addBtn) {
-            addBtn.addEventListener('click', () => this.showAccountModal());
+    // Método de limpieza (opcional, para consistencia con otros módulos)
+    cleanup() {
+        if (this.dataTable) {
+            this.dataTable.destroy();
+            this.dataTable = null;
         }
-
-        // Tabs
-        const tabs = document.querySelectorAll('#accountTabs .nav-link');
-        tabs.forEach(tab => {
-            tab.addEventListener('click', async () => {
-                tabs.forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                this.currentType = tab.dataset.type;
-                await this.loadAccounts();
-            });
-        });
+        this.accounts = [];
+        this.categories = [];
+        this.incomeCategories = [];
+        this.expenseCategories = [];
     }
 };
