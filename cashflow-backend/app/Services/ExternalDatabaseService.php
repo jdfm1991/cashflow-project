@@ -102,12 +102,12 @@ class ExternalDatabaseService
      * Obtener transacciones por año y mes
      * Adaptado a tu estructura de tabla adm_bancos_operaciones
      */
-    public function getTransactions(int $year, int $month): array
+    public function getTransactions(int $year, int $month, int $bankId): array
     {
         try {
             $tableName = $this->getTableName();
 
-            error_log("ExternalDatabaseService: Buscando transacciones en {$tableName} para {$year}-{$month}");
+            error_log("ExternalDatabaseService: Buscando transacciones en {$tableName} para {$year}-{$month}-{$bankId}");
 
             // Consulta adaptada a tu estructura
             $sql = "SELECT 
@@ -120,13 +120,14 @@ class ExternalDatabaseService
                 FROM {$tableName} 
                 WHERE YEAR(fecha_operacion) = :year 
                 AND MONTH(fecha_operacion) = :month
+                AND cod_banco = :bankId
                 AND conciliado = 'Si'
-                ORDER BY fecha_operacion ASC
-                LIMIT 10";
+                ORDER BY fecha_operacion ASC";
 
             $results = $this->query($sql, [
                 'year' => $year,
-                'month' => $month
+                'month' => $month,
+                'bankId' => $bankId
             ]);
 
             error_log("ExternalDatabaseService: Resultados raw: " . json_encode(array_slice($results, 0, 3)));
@@ -233,6 +234,45 @@ class ExternalDatabaseService
             return $months;
         } catch (Exception $e) {
             error_log("ExternalDatabaseService: Error getAvailableMonths - " . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     *  Obtener los banco disponibles en el año y mes seleccionados
+     */
+    public function getAvailableBanks(int $year, int $month): array
+    {
+        try {
+            $tableName = $this->getTableName();
+
+            error_log("ExternalDatabaseService: Buscando bancos para {$year} y {$month} en tabla {$tableName}");
+
+            $sql = "SELECT DISTINCT B.cod_banco as id, B.descripcion as name
+                FROM {$tableName} AS A 
+                INNER JOIN adm_tabla_bancos AS B ON A.cod_banco = B.cod_banco
+                WHERE YEAR(fecha_operacion) = :year 
+                AND MONTH(fecha_operacion) = :month 
+                AND fecha_operacion IS NOT NULL
+                AND conciliado = 'Si'
+                ORDER BY A.cod_banco ASC";
+
+            $results = $this->query($sql, ['year' => $year, 'month' => $month]);
+
+            error_log("ExternalDatabaseService: Resultados query bancos: " . json_encode($results));
+
+            $banks = array_column($results, 'banco');
+
+            error_log("ExternalDatabaseService: Bancos disponibles para {$year} y {$month}: " . json_encode($banks));
+
+            // Asegurar que id sea entero
+            foreach ($results as &$bank) {
+                $bank['id'] = (int) $bank['id'];
+            }
+
+            return $results;
+        } catch (Exception $e) {
+            error_log("ExternalDatabaseService: Error getAvailableBanks - " . $e->getMessage());
             return [];
         }
     }

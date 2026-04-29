@@ -141,7 +141,7 @@ return [
         'middleware' => ['AuthMiddleware']
     ],
 
-    // Años y meses disponibles
+    // Años, meses y bancos disponibles
     [
         'method' => 'GET',
         'pattern' => '#^api/migrations/years$#',
@@ -154,6 +154,13 @@ return [
         'pattern' => '#^api/migrations/months$#',
         'controller' => 'App\\Controllers\\MigrationController',
         'action' => 'getAvailableMonths',
+        'middleware' => ['AuthMiddleware']
+    ],
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/migrations/banks$#',
+        'controller' => 'App\\Controllers\\MigrationController',
+        'action' => 'getAvailableBanks',
         'middleware' => ['AuthMiddleware']
     ],
 

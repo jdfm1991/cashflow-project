@@ -19,113 +19,141 @@ export const migrationModule = {
         await this.loadAccounts();
 
         container.innerHTML = `
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <h1 class="h3">
-                    <i class="bi bi-database-gear"></i> Migración de Datos
-                </h1>
-                <button class="btn btn-primary" id="addConnectionBtn">
-                    <i class="bi bi-plus-circle"></i> Nueva Conexión
-                </button>
-            </div>
-            
-            <!-- Panel de conexiones -->
-            <div class="card shadow-sm mb-4">
-                <div class="card-header bg-info text-white">
-                    <h5 class="mb-0"><i class="bi bi-plug"></i> Conexiones a Bases de Datos Externas</h5>
-                </div>
-                <div class="card-body">
-                    <div id="connectionsList">
-                        ${this.renderConnectionsList()}
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Panel de migración -->
-            <div class="card shadow-sm" id="migrationPanel" style="display: none;">
-                <div class="card-header bg-success text-white">
-                    <h5 class="mb-0"><i class="bi bi-arrow-left-right"></i> Migrar Datos</h5>
-                </div>
-                <div class="card-body">
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            <label class="form-label fw-semibold">Conexión</label>
-                            <select class="form-select" id="connectionSelect">
-                                <option value="">Seleccione una conexión</option>
-                                ${this.connections.map(c => `<option value="${c.id}">${c.name} (${c.company_name || 'Mi empresa'})</option>`).join('')}
-                            </select>
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="h3">
+                <i class="bi bi-database-gear"></i> Migración de Datos
+            </h1>
+            <button class="btn btn-primary" id="addConnectionBtn">
+                <i class="bi bi-plus-circle"></i> Nueva Conexión
+            </button>
+        </div>
+        
+        <!-- Acordeón de conexiones -->
+        <div class="accordion mb-4" id="connectionsAccordion">
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button ${this.connections.length > 0 ? '' : 'collapsed'}" 
+                            type="button" 
+                            data-bs-toggle="collapse" 
+                            data-bs-target="#connectionsCollapse" 
+                            aria-expanded="${this.connections.length > 0 ? 'true' : 'false'}" 
+                            aria-controls="connectionsCollapse">
+                        <div class="d-flex justify-content-between align-items-center w-100 me-3">
+                            <span><i class="bi bi-plug"></i> Conexiones a Bases de Datos Externas</span>
+                            <span class="badge bg-secondary ms-2">${this.connections.length} conexiones</span>
                         </div>
-                        <div class="col-md-3">
-                            <label class="form-label fw-semibold">Año</label>
-                            <select class="form-select" id="yearSelect" disabled>
-                                <option value="">Primero seleccione conexión</option>
-                            </select>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label fw-semibold">Mes</label>
-                            <select class="form-select" id="monthSelect" disabled>
-                                <option value="">Primero seleccione año</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2 d-flex align-items-end">
-                            <button class="btn btn-primary w-100" id="previewBtn" disabled>
-                                <i class="bi bi-eye"></i> Previsualizar
-                            </button>
+                    </button>
+                </h2>
+                <div id="connectionsCollapse" 
+                     class="accordion-collapse collapse ${this.connections.length > 0 ? 'show' : ''}" 
+                     data-bs-parent="#connectionsAccordion">
+                    <div class="accordion-body">
+                        <div id="connectionsList">
+                            ${this.renderConnectionsList()}
                         </div>
                     </div>
                 </div>
             </div>
-            
-            <!-- Panel de previsualización y mapeo -->
-            <div id="mappingPanel" class="card shadow-sm mt-4" style="display: none;">
-                <div class="card-header bg-warning">
-                    <h5 class="mb-0"><i class="bi bi-table"></i> Previsualización y Mapeo</h5>
-                </div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        <div class="d-flex justify-content-between">
-                            <span>Progreso de mapeo:</span>
-                            <span id="mappingInfoText">0 de 0 transacciones mapeadas</span>
-                        </div>
-                        <div class="progress">
-                            <div id="mappingProgress" class="progress-bar bg-info" style="width: 0%">0%</div>
-                        </div>
+        </div>
+        
+        <!-- Panel de migración -->
+        <div class="card shadow-sm" id="migrationPanel" style="display: none;">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="bi bi-arrow-left-right"></i> Migrar Datos</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Conexión</label>
+                        <select class="form-select" id="connectionSelect">
+                            <option value="">Seleccione una conexión</option>
+                            ${this.connections.map(c => `<option value="${c.id}">${c.name} (${c.company_name || 'Mi empresa'})</option>`).join('')}
+                        </select>
                     </div>
-                    <div id="previewTable"></div>
-                    <div class="mt-3 d-flex justify-content-end gap-2">
-                        <button class="btn btn-secondary" id="cancelMigrationBtn">
-                            <i class="bi bi-x-circle"></i> Cancelar
-                        </button>
-                        <button class="btn btn-success" id="executeMigrationBtn" disabled>
-                            <i class="bi bi-download"></i> Ejecutar Migración
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold">Año</label>
+                        <select class="form-select" id="yearSelect" disabled>
+                            <option value="">Primero seleccione conexión</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold">Mes</label>
+                        <select class="form-select" id="monthSelect" disabled>
+                            <option value="">Primero seleccione año</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Banco</label>
+                        <select class="form-select" id="bankSelect" disabled>
+                            <option value="">Primero seleccione mes</option>
+                        </select>
+                    </div>
+                    <div class="col-md-1 d-flex align-items-end">
+                        <button class="btn btn-primary w-100" id="previewBtn" disabled>
+                            <i class="bi bi-eye"></i> Ver
                         </button>
                     </div>
                 </div>
             </div>
-        `;
+        </div>
+        
+        <!-- Panel de previsualización y mapeo -->
+        <div id="mappingPanel" class="card shadow-sm mt-4" style="display: none;">
+            <div class="card-header bg-warning">
+                <h5 class="mb-0"><i class="bi bi-table"></i> Previsualización y Mapeo</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span>Progreso de mapeo:</span>
+                        <span id="mappingInfoText">0 de 0 transacciones mapeadas</span>
+                    </div>
+                    <div class="progress">
+                        <div id="mappingProgress" class="progress-bar bg-info" style="width: 0%">0%</div>
+                    </div>
+                </div>
+                <div id="previewTable"></div>
+                <div class="mt-3 d-flex justify-content-end gap-2">
+                    <button class="btn btn-secondary" id="cancelMigrationBtn">
+                        <i class="bi bi-x-circle"></i> Cancelar
+                    </button>
+                    <button class="btn btn-success" id="executeMigrationBtn" disabled>
+                        <i class="bi bi-download"></i> Ejecutar Migración
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
 
         this.setupEventListeners();
     },
 
     renderConnectionsList() {
         if (this.connections.length === 0) {
-            return `<div class="alert alert-info">No hay conexiones configuradas. <a href="#" id="addConnectionLink">Cree una nueva</a></div>`;
+            return `<div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> No hay conexiones configuradas. 
+                    <a href="#" id="addConnectionLink">Cree una nueva</a>
+                </div>`;
         }
 
         return `
-            <div class="row">
-                ${this.connections.map(conn => `
-                    <div class="col-md-6 mb-3">
-                        <div class="card">
-                            <div class="card-body">
-                                <h6 class="card-title">
-                                    <i class="bi bi-server"></i> ${conn.name}
-                                    ${conn.company_name ? `<span class="badge bg-secondary ms-2">${conn.company_name}</span>` : ''}
+        <div class="row g-3">
+            ${this.connections.map(conn => `
+                <div class="col-md-6 col-lg-4">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h6 class="card-title mb-0">
+                                    <i class="bi bi-server"></i> ${this.escapeHtml(conn.name)}
                                 </h6>
-                                <p class="card-text small text-muted">
-                                    Host: ${conn.host}:${conn.port}<br>
-                                    Base de datos: ${conn.db_name}<br>
-                                    Tabla: ${conn.table_name}
-                                </p>
+                                ${conn.company_name ? `<span class="badge bg-secondary">${this.escapeHtml(conn.company_name)}</span>` : ''}
+                            </div>
+                            <div class="small text-muted mb-3">
+                                <div><i class="bi bi-hdd-stack"></i> ${this.escapeHtml(conn.host)}:${conn.port}</div>
+                                <div><i class="bi bi-database"></i> ${this.escapeHtml(conn.db_name)}</div>
+                                <div><i class="bi bi-table"></i> ${this.escapeHtml(conn.table_name)}</div>
+                            </div>
+                            <div class="btn-group w-100" role="group">
                                 <button class="btn btn-sm btn-outline-primary test-connection" data-id="${conn.id}">
                                     <i class="bi bi-check-circle"></i> Probar
                                 </button>
@@ -138,17 +166,38 @@ export const migrationModule = {
                             </div>
                         </div>
                     </div>
-                `).join('')}
-            </div>
-        `;
+                </div>
+            `).join('')}
+        </div>
+    `;
+    },
+
+    // Agrega este método helper para evitar XSS
+    escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     },
 
     async loadConnections() {
         try {
             const response = await api.get('api/migrations/connections');
             if (response.success && response.data) {
+                const hadConnections = this.connections.length > 0;
                 this.connections = response.data;
                 console.log('Conexiones cargadas:', this.connections.length);
+
+                // Actualizar el contador de conexiones en el acordeón
+                const badge = document.querySelector('#connectionsAccordion .accordion-button .badge');
+                if (badge) {
+                    badge.textContent = `${this.connections.length} conexiones`;
+                }
+
+                // Si antes no había conexiones y ahora hay, mostrar el acordeón
+                if (!hadConnections && this.connections.length > 0) {
+                    this.openConnectionsAccordion();
+                }
             }
         } catch (error) {
             console.error('Error loading connections:', error);
@@ -195,6 +244,9 @@ export const migrationModule = {
         const migrationPanel = document.getElementById('migrationPanel');
         if (migrationPanel) migrationPanel.style.display = 'block';
 
+        // Cerrar el acordeón para optimizar espacio
+        this.closeConnectionsAccordion();
+
         // Configurar selector de conexión
         const connectionSelect = document.getElementById('connectionSelect');
         if (connectionSelect) {
@@ -205,6 +257,7 @@ export const migrationModule = {
         // ✅ Limpiar selects de año y mes
         const yearSelect = document.getElementById('yearSelect');
         const monthSelect = document.getElementById('monthSelect');
+        const bankSelect = document.getElementById('bankSelect');
         const previewBtn = document.getElementById('previewBtn');
 
         if (yearSelect) {
@@ -215,10 +268,56 @@ export const migrationModule = {
             monthSelect.innerHTML = '<option value="">Primero seleccione año</option>';
             monthSelect.disabled = true;
         }
+        if (bankSelect) {
+            bankSelect.innerHTML = '<option value="">Primero seleccione mes</option>';
+            bankSelect.disabled = true;
+        }
         if (previewBtn) previewBtn.disabled = true;
 
         // Cargar años disponibles
         await this.loadAvailableYears(connectionId);
+    },
+
+    // Método para cerrar el acordeón
+    closeConnectionsAccordion() {
+        const accordionCollapse = document.getElementById('connectionsCollapse');
+        if (accordionCollapse && accordionCollapse.classList.contains('show')) {
+            const button = document.querySelector('#connectionsAccordion .accordion-button');
+            if (button) {
+                button.classList.add('collapsed');
+                button.setAttribute('aria-expanded', 'false');
+            }
+            // Usar Bootstrap collapse API si está disponible
+            if (window.bootstrap && window.bootstrap.Collapse) {
+                const bsCollapse = new bootstrap.Collapse(accordionCollapse, {
+                    toggle: false
+                });
+                bsCollapse.hide();
+            } else {
+                // Fallback: cambiar manualmente la clase
+                accordionCollapse.classList.remove('show');
+            }
+        }
+    },
+
+    // Método para abrir el acordeón (opcional, para cuando se necesite)
+    openConnectionsAccordion() {
+        const accordionCollapse = document.getElementById('connectionsCollapse');
+        if (accordionCollapse && !accordionCollapse.classList.contains('show')) {
+            const button = document.querySelector('#connectionsAccordion .accordion-button');
+            if (button) {
+                button.classList.remove('collapsed');
+                button.setAttribute('aria-expanded', 'true');
+            }
+            if (window.bootstrap && window.bootstrap.Collapse) {
+                const bsCollapse = new bootstrap.Collapse(accordionCollapse, {
+                    toggle: false
+                });
+                bsCollapse.show();
+            } else {
+                accordionCollapse.classList.add('show');
+            }
+        }
     },
 
     async loadAvailableYears(connectionId) {
@@ -294,13 +393,55 @@ export const migrationModule = {
         }
     },
 
+    async loadAvailableBanks(connectionId, year, month) {
+        try {
+            const response = await api.get(`api/migrations/banks?connection_id=${connectionId}&year=${year}&month=${month}`);
+            const bankSelect = document.getElementById('bankSelect');
+            const previewBtn = document.getElementById('previewBtn');
+
+            if (response.success && response.data && response.data.banks) {
+                const banks = response.data.banks;
+                if (banks.length === 0) {
+                    bankSelect.innerHTML = '<option value="">No hay bancos disponibles</option>';
+                    bankSelect.disabled = true;
+                    if (previewBtn) previewBtn.disabled = true;
+                } else {
+                    bankSelect.innerHTML = '<option value="">Seleccione banco</option>' +
+                        banks.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+                    bankSelect.disabled = false;
+                    // No habilitar preview todavía, esperar a que seleccione banco
+                    if (previewBtn) previewBtn.disabled = true;
+                }
+            } else {
+                bankSelect.innerHTML = '<option value="">Error al cargar bancos</option>';
+                bankSelect.disabled = true;
+                if (previewBtn) previewBtn.disabled = true;
+            }
+        } catch (error) {
+            console.error('Error loading banks:', error);
+            showAlert('Error al cargar los bancos disponibles', 'danger');
+        }
+    },
+
     async preview() {
         const connectionId = document.getElementById('connectionSelect').value;
         const year = document.getElementById('yearSelect').value;
         const month = document.getElementById('monthSelect').value;
+        const bankId = document.getElementById('bankSelect').value;
 
-        if (!connectionId || !year || !month) {
-            showAlert('Seleccione conexión, año y mes', 'warning');
+        // Depuración: Verificar valores
+        console.log('Valores seleccionados:', { connectionId, year, month, bankId });
+        console.log('bankId type:', typeof bankId, 'value:', bankId);
+
+        if (!connectionId || !year || !month || !bankId) {
+            showAlert('Seleccione conexión, año, mes y banco', 'warning');
+            return;
+        }
+
+        // Asegurar que bankId sea un número entero
+        const bankIdInt = parseInt(bankId);
+        if (isNaN(bankIdInt) || bankIdInt <= 0) {
+            showAlert('Seleccione un banco válido', 'warning');
             return;
         }
 
@@ -312,7 +453,8 @@ export const migrationModule = {
             const response = await api.post('api/migrations/preview', {
                 connection_id: parseInt(connectionId),
                 year: parseInt(year),
-                month: parseInt(month)
+                month: parseInt(month),
+                bank_id: parseInt(bankId)
             });
 
             if (response.success && response.data) {
@@ -378,7 +520,7 @@ export const migrationModule = {
                     <td>${transaction.reference || '-'}</td>
                     <td title="${transaction.description}">${transaction.description.substring(0, 80)}${transaction.description.length > 80 ? '...' : ''}</td>
                     <td class="${transaction.transaction_type === 'income' ? 'text-success' : 'text-danger'}">
-                        ${ formattedAmount }
+                        ${formattedAmount}
                     </td>
                     <td>
                         <span class="badge ${transaction.transaction_type === 'income' ? 'bg-success' : 'bg-danger'}">
@@ -547,10 +689,38 @@ export const migrationModule = {
         // ✅ EVENTO PARA CUANDO CAMBIA EL MES
         const monthSelect = document.getElementById('monthSelect');
         if (monthSelect) {
-            monthSelect.addEventListener('change', (e) => {
+            monthSelect.addEventListener('change', async (e) => {
+                const year = document.getElementById('yearSelect').value;
+                const month = e.target.value;
+                const connectionId = this.currentConnectionId;
+
+                if (connectionId && year && month) {
+                    // Limpiar y deshabilitar bankSelect mientras carga
+                    const bankSelect = document.getElementById('bankSelect');
+                    if (bankSelect) {
+                        bankSelect.innerHTML = '<option value="">Cargando bancos...</option>';
+                        bankSelect.disabled = true;
+                    }
+                    const previewBtn = document.getElementById('previewBtn');
+                    if (previewBtn) previewBtn.disabled = true;
+
+                    await this.loadAvailableBanks(connectionId, year, month);
+                }
+            });
+        }
+
+        // ✅ EVENTO PARA CUANDO CAMBIA EL BANCO
+        const bankSelect = document.getElementById('bankSelect');
+        if (bankSelect) {
+            // Remove existing event listener to avoid duplicates
+            const newBankSelect = bankSelect.cloneNode(true);
+            bankSelect.parentNode.replaceChild(newBankSelect, bankSelect);
+
+            newBankSelect.addEventListener('change', (e) => {
                 const previewBtn = document.getElementById('previewBtn');
                 if (previewBtn) {
                     previewBtn.disabled = !e.target.value;
+                    console.log('Banco seleccionado:', e.target.value);
                 }
             });
         }

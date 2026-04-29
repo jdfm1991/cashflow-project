@@ -37,7 +37,7 @@ class MigrationController
         if ($userId <= 0) {
             return 'guest';
         }
-        
+
         $userModel = new \App\Models\User();
         $user = $userModel->find($userId);
         return $user['role'] ?? 'user';
@@ -68,12 +68,12 @@ class MigrationController
         $userId = $this->getUserId();
         $userRole = $this->getUserRole($userId);
         $companyId = $this->getCompanyId();
-        
+
         error_log("=== getConnections ===");
         error_log("User ID: " . $userId);
         error_log("User Role: " . $userRole);
         error_log("Company ID: " . $companyId);
-        
+
         if ($userRole === 'super_admin') {
             // ✅ Super admin puede ver TODAS las conexiones de TODAS las empresas
             $connections = $this->connectionModel->getAll();
@@ -87,12 +87,12 @@ class MigrationController
             $connections = $this->connectionModel->getByCompany($companyId);
             error_log("Usuario normal: Mostrando " . count($connections) . " conexiones de la empresa {$companyId}");
         }
-        
+
         // Ocultar contraseñas
         foreach ($connections as &$conn) {
             unset($conn['password']);
         }
-        
+
         Response::success($connections);
     }
 
@@ -105,21 +105,21 @@ class MigrationController
         $userId = $this->getUserId();
         $userRole = $this->getUserRole($userId);
         $companyId = $this->getCompanyId();
-        
+
         error_log("=== createConnection ===");
         error_log("User ID: " . $userId);
         error_log("User Role: " . $userRole);
         error_log("Company ID: " . $companyId);
-        
+
         // ✅ Verificar que el usuario tiene una empresa asociada
         if ($companyId <= 0) {
             Response::unauthorized('No se pudo identificar la empresa');
             return;
         }
-        
+
         $rawInput = file_get_contents('php://input');
         $data = json_decode($rawInput, true);
-        
+
         $validator = new Validator($data);
         $validator->required('name');
         $validator->required('host');
@@ -127,12 +127,12 @@ class MigrationController
         $validator->required('username');
         $validator->required('password');
         $validator->required('table_name');
-        
+
         if (!$validator->passes()) {
             Response::validationError($validator->errors());
             return;
         }
-        
+
         // Probar conexión antes de guardar
         $extService = new ExternalDatabaseService([
             'host' => $data['host'],
@@ -141,13 +141,13 @@ class MigrationController
             'username' => $data['username'],
             'password' => $data['password']
         ]);
-        
+
         $testResult = $extService->testConnection();
         if (!$testResult['success']) {
             Response::validationError(['connection' => $testResult['message']]);
             return;
         }
-        
+
         // ✅ La conexión se crea asociada a la empresa del usuario
         $connectionData = [
             'company_id' => $companyId,
@@ -163,9 +163,9 @@ class MigrationController
             'query_template' => $data['query_template'] ?? null,
             'is_active' => true
         ];
-        
+
         $connection = $this->connectionModel->create($connectionData);
-        
+
         if ($connection) {
             unset($connection['password']);
             Response::success($connection, 'Conexión creada exitosamente', 201);
@@ -183,18 +183,18 @@ class MigrationController
         $userId = $this->getUserId();
         $userRole = $this->getUserRole($userId);
         $companyId = $this->getCompanyId();
-        
+
         error_log("=== deleteConnection ===");
         error_log("Connection ID: " . $id);
         error_log("User Role: " . $userRole);
-        
+
         $connection = $this->connectionModel->find($id);
-        
+
         if (!$connection) {
             Response::notFound('Conexión no encontrada');
             return;
         }
-        
+
         // ✅ Verificar permisos
         if ($userRole === 'super_admin') {
             // Super admin puede eliminar cualquier conexión
@@ -207,14 +207,14 @@ class MigrationController
             }
             error_log("Usuario normal eliminando conexión de su empresa");
         }
-        
+
         // Verificar si hay logs asociados
         $logs = $this->logModel->getByConnection($id);
         if (!empty($logs)) {
             Response::error('No se puede eliminar la conexión porque tiene migraciones asociadas', 400);
             return;
         }
-        
+
         if ($this->connectionModel->delete($id)) {
             Response::success(null, 'Conexión eliminada exitosamente');
         } else {
@@ -232,18 +232,18 @@ class MigrationController
         $userRole = $this->getUserRole($userId);
         $companyId = $this->getCompanyId();
         $connectionId = (int) ($_GET['connection_id'] ?? 0);
-        
+
         error_log("=== getAvailableYears ===");
         error_log("Connection ID: " . $connectionId);
         error_log("User Role: " . $userRole);
-        
+
         $connection = $this->connectionModel->find($connectionId);
-        
+
         if (!$connection) {
             Response::notFound('Conexión no encontrada');
             return;
         }
-        
+
         // ✅ Verificar permisos
         if ($userRole !== 'super_admin') {
             if ($connection['company_id'] != $companyId) {
@@ -251,7 +251,7 @@ class MigrationController
                 return;
             }
         }
-        
+
         $extService = new ExternalDatabaseService([
             'host' => $connection['host'],
             'port' => $connection['port'],
@@ -259,15 +259,15 @@ class MigrationController
             'username' => $connection['username'],
             'password' => ExternalDatabaseService::decryptPassword($connection['password'])
         ]);
-        
+
         if (!$extService->connect()) {
             Response::error('No se pudo conectar a la base de datos externa', 500);
             return;
         }
-        
+
         $years = $extService->getAvailableYears();
         $extService->disconnect();
-        
+
         Response::success(['years' => $years]);
     }
 
@@ -282,19 +282,19 @@ class MigrationController
         $companyId = $this->getCompanyId();
         $connectionId = (int) ($_GET['connection_id'] ?? 0);
         $year = (int) ($_GET['year'] ?? 0);
-        
+
         error_log("=== getAvailableMonths ===");
         error_log("Connection ID: " . $connectionId);
         error_log("Year: " . $year);
         error_log("User Role: " . $userRole);
-        
+
         $connection = $this->connectionModel->find($connectionId);
-        
+
         if (!$connection) {
             Response::notFound('Conexión no encontrada');
             return;
         }
-        
+
         // ✅ Verificar permisos
         if ($userRole !== 'super_admin') {
             if ($connection['company_id'] != $companyId) {
@@ -302,7 +302,7 @@ class MigrationController
                 return;
             }
         }
-        
+
         $extService = new ExternalDatabaseService([
             'host' => $connection['host'],
             'port' => $connection['port'],
@@ -310,16 +310,69 @@ class MigrationController
             'username' => $connection['username'],
             'password' => ExternalDatabaseService::decryptPassword($connection['password'])
         ]);
-        
+
         if (!$extService->connect()) {
             Response::error('No se pudo conectar a la base de datos externa', 500);
             return;
         }
-        
+
         $months = $extService->getAvailableMonths($year);
         $extService->disconnect();
-        
+
         Response::success(['months' => $months]);
+    }
+
+    /**
+     * GET /api/migrations/banks
+     * Obtener los bancos disponibles (verificar permisos de la conexión)
+     */
+    public function getAvailableBanks(): void
+    {
+        $userId = $this->getUserId();
+        $userRole = $this->getUserRole($userId);
+        $companyId = $this->getCompanyId();
+        $connectionId = (int) ($_GET['connection_id'] ?? 0);
+        $year = (int) ($_GET['year'] ?? 0);
+        $month = (int) ($_GET['month'] ?? 0);
+
+        error_log("=== getAvailableBanks ===");
+        error_log("Connection ID: " . $connectionId);
+        error_log("Year: " . $year);
+        error_log("Month: " . $month);
+        error_log("User Role: " . $userRole);
+
+        $connection = $this->connectionModel->find($connectionId);
+
+        if (!$connection) {
+            Response::notFound('Conexión no encontrada');
+            return;
+        }
+
+        // ✅ Verificar permisos
+        if ($userRole !== 'super_admin') {
+            if ($connection['company_id'] != $companyId) {
+                Response::forbidden('No tienes permisos para acceder a esta conexión');
+                return;
+            }
+        }
+
+        $extService = new ExternalDatabaseService([
+            'host' => $connection['host'],
+            'port' => $connection['port'],
+            'db_name' => $connection['db_name'],
+            'username' => $connection['username'],
+            'password' => ExternalDatabaseService::decryptPassword($connection['password'])
+        ]);
+
+        if (!$extService->connect()) {
+            Response::error('No se pudo conectar a la base de datos externa', 500);
+            return;
+        }
+
+        $banks = $extService->getAvailableBanks($year, $month);
+        $extService->disconnect();
+
+        Response::success(['banks' => $banks]);
     }
 
     /**
@@ -331,30 +384,33 @@ class MigrationController
         $userId = $this->getUserId();
         $userRole = $this->getUserRole($userId);
         $companyId = $this->getCompanyId();
-        
+
         $rawInput = file_get_contents('php://input');
         $data = json_decode($rawInput, true);
-        
+
         error_log("=== MIGRATION PREVIEW ===");
         error_log("User Role: " . $userRole);
-        
+        error_log("Datos recibidos: " . json_encode($data));
+
         $validator = new Validator($data ?? []);
         $validator->required('connection_id');
         $validator->required('year');
         $validator->required('month');
-        
+        $validator->required('bank_id');
+
         if (!$validator->passes()) {
+            error_log("Validación fallida: " . json_encode($validator->errors()));
             Response::validationError($validator->errors());
             return;
         }
-        
+
         $connection = $this->connectionModel->find($data['connection_id']);
-        
+
         if (!$connection) {
             Response::notFound('Conexión no encontrada');
             return;
         }
-        
+
         // ✅ Verificar permisos
         if ($userRole !== 'super_admin') {
             if ($connection['company_id'] != $companyId) {
@@ -362,7 +418,7 @@ class MigrationController
                 return;
             }
         }
-        
+
         // Configuración para el servicio externo
         $config = [
             'host' => $connection['host'],
@@ -372,17 +428,21 @@ class MigrationController
             'username' => $connection['username'],
             'password' => ExternalDatabaseService::decryptPassword($connection['password'])
         ];
-        
+
         $extService = new ExternalDatabaseService($config);
-        
+
         if (!$extService->connect()) {
             Response::error('No se pudo conectar a la base de datos externa', 500);
             return;
         }
-        
-        $transactions = $extService->getTransactions($data['year'], $data['month']);
+
+        // Obtener el bank_id
+        $bankId = (int) $data['bank_id'];
+        error_log("Bank ID: " . $bankId);
+
+        $transactions = $extService->getTransactions($data['year'], $data['month'], $bankId);
         $extService->disconnect();
-        
+
         if (empty($transactions)) {
             Response::success([
                 'session_id' => null,
@@ -392,7 +452,7 @@ class MigrationController
             ]);
             return;
         }
-        
+
         // Formatear para previsualización
         $preview = [];
         foreach ($transactions as $transaction) {
@@ -405,12 +465,12 @@ class MigrationController
                 'operation_number' => $transaction['operation_number'] ?? ''
             ];
         }
-        
+
         $incomeAccounts = $this->accountModel->getGlobalAccounts('income');
         $expenseAccounts = $this->accountModel->getGlobalAccounts('expense');
-        
+
         $sessionId = uniqid('migration_');
-        
+
         foreach ($preview as $transaction) {
             $this->importedModel->create([
                 'company_id' => $companyId,
@@ -423,7 +483,7 @@ class MigrationController
                 'import_session_id' => $sessionId
             ]);
         }
-        
+
         Response::success([
             'session_id' => $sessionId,
             'total_transactions' => count($preview),
@@ -446,47 +506,47 @@ class MigrationController
         $userId = $this->getUserId();
         $userRole = $this->getUserRole($userId);
         $companyId = $this->getCompanyId();
-        
+
         $rawInput = file_get_contents('php://input');
         $data = json_decode($rawInput, true);
-        
+
         error_log("=== MIGRATION EXECUTE ===");
         error_log("User Role: " . $userRole);
-        
+
         $validator = new Validator($data ?? []);
         $validator->required('session_id');
         $validator->required('connection_id');
         $validator->required('year');
         $validator->required('month');
-        
+
         if (!$validator->passes()) {
             Response::validationError($validator->errors());
             return;
         }
-        
+
         // ✅ Verificar que la sesión pertenece a la empresa
         $transactions = $this->importedModel->getBySession($companyId, $data['session_id']);
-        
+
         if (empty($transactions)) {
             Response::notFound('No se encontraron transacciones para esta sesión');
             return;
         }
-        
+
         // ✅ Verificar permisos de la conexión
         $connection = $this->connectionModel->find($data['connection_id']);
-        
+
         if (!$connection) {
             Response::notFound('Conexión no encontrada');
             return;
         }
-        
+
         if ($userRole !== 'super_admin') {
             if ($connection['company_id'] != $companyId) {
                 Response::forbidden('No tienes permisos para usar esta conexión');
                 return;
             }
         }
-        
+
         // Crear log de migración
         $logData = [
             'company_id' => $companyId,
@@ -498,18 +558,18 @@ class MigrationController
             'started_at' => date('Y-m-d H:i:s'),
             'created_by' => $userId
         ];
-        
+
         $logId = $this->logModel->createLog($logData);
-        
+
         if (!$logId) {
             Response::error('No se pudo crear el registro de migración', 500);
             return;
         }
-        
+
         // Configurar cuentas por defecto
         $defaultIncomeAccountId = 3;
         $defaultExpenseAccountId = 8;
-        
+
         // Construir mapa de mappings
         $mappingsMap = [];
         if (!empty($data['mappings']) && is_array($data['mappings'])) {
@@ -521,33 +581,33 @@ class MigrationController
                 }
             }
         }
-        
+
         $currencyService = new \App\Services\CurrencyService();
         $baseCurrency = $currencyService->getBaseCurrency();
         $baseCurrencyId = $baseCurrency['id'] ?? 9;
-        
+
         $imported = 0;
         $duplicated = 0;
         $failed = 0;
         $errors = [];
-        
+
         foreach ($transactions as $transaction) {
             $transactionId = (int) $transaction['id'];
             $type = $transaction['transaction_type'];
             $amount = (float) $transaction['amount'];
-            
+
             if (isset($mappingsMap[$transactionId])) {
                 $accountId = $mappingsMap[$transactionId];
             } else {
                 $accountId = ($type === 'income') ? $defaultIncomeAccountId : $defaultExpenseAccountId;
             }
-            
+
             if ($this->transactionExists($companyId, $transaction)) {
                 $duplicated++;
                 $this->importedModel->markAsProcessed($transactionId, $accountId);
                 continue;
             }
-            
+
             $transactionData = [
                 'company_id' => $companyId,
                 'user_id' => $userId,
@@ -561,7 +621,7 @@ class MigrationController
                 'reference' => $transaction['reference'] ?? '',
                 'payment_method' => 'bank'
             ];
-            
+
             try {
                 if ($type === 'income') {
                     $incomeModel = new \App\Models\Income();
@@ -570,7 +630,7 @@ class MigrationController
                     $expenseModel = new \App\Models\Expense();
                     $result = $expenseModel->create($transactionData);
                 }
-                
+
                 if ($result) {
                     $this->importedModel->markAsProcessed($transactionId, $accountId);
                     $imported++;
@@ -583,7 +643,7 @@ class MigrationController
                 $errors[] = "Transacción ID {$transactionId}: " . $e->getMessage();
             }
         }
-        
+
         $this->logModel->updateLog($logId, [
             'total_records' => count($transactions),
             'imported_records' => $imported,
@@ -593,9 +653,9 @@ class MigrationController
             'status' => 'completed',
             'completed_at' => date('Y-m-d H:i:s')
         ]);
-        
+
         $message = "Migración completada: {$imported} importadas, {$duplicated} duplicadas, {$failed} fallidas";
-        
+
         Response::success([
             'imported' => $imported,
             'duplicated' => $duplicated,
@@ -615,11 +675,11 @@ class MigrationController
         $userRole = $this->getUserRole($userId);
         $companyId = $this->getCompanyId();
         $limit = (int) ($_GET['limit'] ?? 50);
-        
+
         error_log("=== getLogs ===");
         error_log("User Role: " . $userRole);
         error_log("Company ID: " . $companyId);
-        
+
         if ($userRole === 'super_admin') {
             // ✅ Super admin puede ver TODOS los logs de TODAS las empresas
             $logs = $this->logModel->getAll($limit);
@@ -633,7 +693,7 @@ class MigrationController
             $logs = $this->logModel->getByCompany($companyId, $limit);
             error_log("Usuario normal: Mostrando " . count($logs) . " logs de la empresa {$companyId}");
         }
-        
+
         Response::success($logs);
     }
 
@@ -647,18 +707,18 @@ class MigrationController
         $userRole = $this->getUserRole($userId);
         $companyId = $this->getCompanyId();
         $connectionId = (int) ($_GET['connection_id'] ?? 0);
-        
+
         error_log("=== testConnection ===");
         error_log("Connection ID: " . $connectionId);
         error_log("User Role: " . $userRole);
-        
+
         $connection = $this->connectionModel->find($connectionId);
-        
+
         if (!$connection) {
             Response::notFound('Conexión no encontrada');
             return;
         }
-        
+
         // ✅ Verificar permisos
         if ($userRole !== 'super_admin') {
             if ($connection['company_id'] != $companyId) {
@@ -666,7 +726,7 @@ class MigrationController
                 return;
             }
         }
-        
+
         $extService = new ExternalDatabaseService([
             'host' => $connection['host'],
             'port' => $connection['port'],
@@ -674,9 +734,9 @@ class MigrationController
             'username' => $connection['username'],
             'password' => ExternalDatabaseService::decryptPassword($connection['password'])
         ]);
-        
+
         $result = $extService->testConnection();
-        
+
         Response::success([
             'connection_id' => $connectionId,
             'connection_name' => $connection['name'],
@@ -688,13 +748,13 @@ class MigrationController
     private function transactionExists(int $companyId, array $transaction): bool
     {
         $db = \App\Config\Database::getInstance()->getConnection();
-        
+
         $sql = "SELECT COUNT(*) as total FROM incomes 
                 WHERE company_id = :company_id 
                 AND date = :date 
                 AND amount = :amount
                 AND reference = :reference";
-        
+
         $stmt = $db->prepare($sql);
         $stmt->execute([
             'company_id' => $companyId,
@@ -703,17 +763,17 @@ class MigrationController
             'reference' => $transaction['reference']
         ]);
         $result = $stmt->fetch();
-        
+
         if (($result['total'] ?? 0) > 0) {
             return true;
         }
-        
+
         $sql = "SELECT COUNT(*) as total FROM expenses 
                 WHERE company_id = :company_id 
                 AND date = :date 
                 AND amount = :amount
                 AND reference = :reference";
-        
+
         $stmt = $db->prepare($sql);
         $stmt->execute([
             'company_id' => $companyId,
@@ -722,7 +782,7 @@ class MigrationController
             'reference' => $transaction['reference']
         ]);
         $result = $stmt->fetch();
-        
+
         return ($result['total'] ?? 0) > 0;
     }
 }
