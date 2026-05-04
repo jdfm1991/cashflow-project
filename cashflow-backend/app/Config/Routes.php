@@ -249,6 +249,15 @@ return [
         'middleware' => ['AuthMiddleware']
     ],
 
+    // Obtener logo
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/companies/(\d+)/logo$#',
+        'controller' => 'App\\Controllers\\CompanyController',
+        'action' => 'getLogo',
+        'middleware' => []
+    ],
+
     // ============================================
     // RUTAS PÚBLICAS DEL DASHBOARD
     // ============================================
@@ -390,7 +399,7 @@ return [
         'action' => 'destroy',
         'middleware' => ['AuthMiddleware']
     ],
-    
+
     // ============================================
     // RUTAS DE CUENTAS
     // ============================================

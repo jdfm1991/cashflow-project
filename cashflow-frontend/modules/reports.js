@@ -1,8 +1,7 @@
-// modules/reports.js - Agregar gráficas al reporte
-
 import { api } from '../services/apiService.js';
 import { accountService } from '../services/accountService.js';
 import { transactionService } from '../services/transactionService.js';
+import { companyService } from '../services/companyService.js';
 import { formatCurrency, formatDate, showAlert } from '../utils/helpers.js';
 
 export const reportsModule = {
@@ -10,8 +9,22 @@ export const reportsModule = {
     reportData: null,
     currentYear: null,
     chartInstance: null,
+    companies: [],
+    selectedCompanyId: null,
+    companyInfo: null,
 
     async render(container) {
+        const user = api.getUser();
+        const isSuperAdmin = user?.role === 'super_admin';
+
+        // Cargar empresas si es super_admin
+        if (isSuperAdmin) {
+            await this.loadCompanies();
+        } else {
+            // Cargar información de la empresa del usuario
+            await this.loadUserCompany();
+        }
+
         container.innerHTML = `
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h1 class="h3">Reportes Financieros</h1>
@@ -30,15 +43,30 @@ export const reportsModule = {
                 </div>
                 <div class="card-body">
                     <div class="row g-3 align-items-end">
+                        ${isSuperAdmin ? `
                         <div class="col-md-3">
+                            <label class="form-label fw-semibold">
+                                <i class="bi bi-building"></i> Empresa
+                            </label>
+                            <select class="form-select" id="companySelect">
+                                <option value="">Todas las empresas</option>
+                                ${this.companies.map(c => `
+                                    <option value="${c.id}" ${this.selectedCompanyId == c.id ? 'selected' : ''}>
+                                        ${c.name} ${c.business_name ? `(${c.business_name})` : ''}
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        ` : ''}
+                        <div class="col-md-${isSuperAdmin ? '3' : '4'}">
                             <label class="form-label fw-semibold">Fecha desde</label>
                             <input type="date" class="form-control" id="filterStartDate" value="${this.getDefaultStartDate()}">
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-${isSuperAdmin ? '3' : '4'}">
                             <label class="form-label fw-semibold">Fecha hasta</label>
                             <input type="date" class="form-control" id="filterEndDate" value="${this.getDefaultEndDate()}">
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-${isSuperAdmin ? '3' : '4'}">
                             <label class="form-label fw-semibold">Agrupar por</label>
                             <select class="form-select" id="groupBy">
                                 <option value="year">Año</option>
@@ -46,18 +74,16 @@ export const reportsModule = {
                                 <option value="quarter">Trimestre</option>
                             </select>
                         </div>
-                        <div class="col-md-3">
-                            <button class="btn btn-primary w-100" id="applyFiltersBtn">
-                                <i class="bi bi-search"></i> Generar Reporte
-                            </button>
-                        </div>
                     </div>
                     <div class="row mt-3">
                         <div class="col-12">
-                            <button class="btn btn-success" id="exportExcelBtn">
+                            <button class="btn btn-primary" id="applyFiltersBtn">
+                                <i class="bi bi-search"></i> Generar Reporte
+                            </button>
+                            <button class="btn btn-success ms-2" id="exportExcelBtn">
                                 <i class="bi bi-file-excel"></i> Exportar a Excel
                             </button>
-                            <button class="btn btn-danger" id="exportPdfBtn">
+                            <button class="btn btn-danger ms-2" id="exportPdfBtn">
                                 <i class="bi bi-file-pdf"></i> Exportar a PDF
                             </button>
                         </div>
@@ -71,7 +97,45 @@ export const reportsModule = {
 
         await this.loadAccounts();
         this.setupEventListeners();
-        await this.generateReport();
+
+        // Si hay una empresa seleccionada, generar reporte automáticamente
+        if (this.selectedCompanyId || !isSuperAdmin) {
+            await this.generateReport();
+        }
+    },
+
+    async loadCompanies() {
+        try {
+            const response = await companyService.getAll();
+            if (response.success && response.data) {
+                this.companies = response.data;
+            }
+        } catch (error) {
+            console.error('Error loading companies:', error);
+        }
+    },
+
+    async loadUserCompany() {
+        try {
+            const response = await companyService.getMyCompany();
+            if (response.success && response.data) {
+                this.companyInfo = response.data;
+                this.selectedCompanyId = this.companyInfo.id;
+            }
+        } catch (error) {
+            console.error('Error loading user company:', error);
+        }
+    },
+
+    async loadCompanyInfo(companyId) {
+        try {
+            const response = await companyService.getById(companyId);
+            if (response.success && response.data) {
+                this.companyInfo = response.data;
+            }
+        } catch (error) {
+            console.error('Error loading company info:', error);
+        }
     },
 
     getDefaultStartDate() {
@@ -96,6 +160,9 @@ export const reportsModule = {
     },
 
     async generateReport() {
+        const user = api.getUser();
+        const isSuperAdmin = user?.role === 'super_admin';
+        const companyId = isSuperAdmin ? (document.getElementById('companySelect')?.value || '') : this.selectedCompanyId;
         const startDate = document.getElementById('filterStartDate').value;
         const endDate = document.getElementById('filterEndDate').value;
         const groupBy = document.getElementById('groupBy').value;
@@ -103,6 +170,13 @@ export const reportsModule = {
         if (!startDate || !endDate) {
             showAlert('Seleccione un rango de fechas', 'warning');
             return;
+        }
+
+        // Si es super_admin y seleccionó una empresa, cargar su información
+        if (isSuperAdmin && companyId) {
+            await this.loadCompanyInfo(companyId);
+        } else if (!isSuperAdmin && this.companyInfo) {
+            // Ya tiene la información de su empresa
         }
 
         // Mostrar loading
@@ -117,9 +191,14 @@ export const reportsModule = {
         `;
 
         try {
-            // Obtener todas las transacciones
-            const incomeResponse = await transactionService.getIncomes({ start_date: startDate, end_date: endDate });
-            const expenseResponse = await transactionService.getExpenses({ start_date: startDate, end_date: endDate });
+            // Construir filtros
+            const filters = { start_date: startDate, end_date: endDate };
+            if (companyId && companyId !== '') {
+                filters.company_id = companyId;
+            }
+
+            const incomeResponse = await transactionService.getIncomes(filters);
+            const expenseResponse = await transactionService.getExpenses(filters);
 
             let incomes = incomeResponse.success ? (incomeResponse.data.incomes || incomeResponse.data) : [];
             let expenses = expenseResponse.success ? (expenseResponse.data.expenses || expenseResponse.data) : [];
@@ -671,40 +750,146 @@ export const reportsModule = {
         }
 
         const { jsPDF } = window.jspdf;
+
+        // ============================================
+        // 1. CARGAR LOGO ANTES DE GENERAR EL PDF
+        // ============================================
+        let logoImage = null;
+
+        if (this.companyInfo?.id && this.companyInfo?.logo) {
+            try {
+                const logoUrl = companyService.getLogoUrl(this.companyInfo.id);
+                console.log('Cargando logo desde:', logoUrl);
+
+                const response = await fetch(logoUrl);
+                if (response.ok) {
+                    const blob = await response.blob();
+                    logoImage = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result);
+                        reader.readAsDataURL(blob);
+                    });
+                    console.log('Logo cargado correctamente');
+                } else {
+                    console.warn('No se pudo cargar el logo:', response.status);
+                }
+            } catch (error) {
+                console.error('Error cargando logo:', error);
+            }
+        }
+
+        // ============================================
+        // 2. GENERAR PDF CON EL LOGO (si está disponible)
+        // ============================================
         const doc = new jsPDF('p', 'mm', 'a4');
-        let yPos = 20;
+
+        // Configuración de márgenes
+        const MARGIN = {
+            left: 20,
+            right: 190,
+            top: 55,
+            bottom: 280
+        };
+
         const groupBy = document.getElementById('groupBy').value;
+        const startDate = document.getElementById('filterStartDate').value;
+        const endDate = document.getElementById('filterEndDate').value;
+
+        const companyName = this.companyInfo?.name || 'FlowControl';
+        const businessName = this.companyInfo?.business_name || '';
+        const taxId = this.companyInfo?.tax_id || '';
 
         // ============================================
-        // ENCABEZADO CON LOGO
+        // FUNCIÓN PARA DIBUJAR ENCABEZADO (usa el logo precargado)
         // ============================================
-        doc.setFillColor(25, 42, 86);
-        doc.rect(0, 0, 210, 55, 'F');
+        const drawHeader = (pageNumber) => {
+            doc.setPage(pageNumber);
 
-        // Logo
-        doc.setFillColor(255, 193, 7);
-        doc.circle(25, 27, 12, 'F');
-        doc.setTextColor(25, 42, 86);
-        doc.setFontSize(16);
-        doc.setFont('helvetica', 'bold');
-        doc.text('FC', 21, 32);
+            // Fondo del encabezado
+            doc.setFillColor(25, 42, 86);
+            doc.rect(0, 0, 210, 50, 'F');
 
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(22);
-        doc.setFont('helvetica', 'bold');
-        doc.text('FlowControl', 45, 30);
+            // Logo (usar el precargado o dibujar por defecto)
+            if (logoImage) {
+                try {
+                    doc.addImage(logoImage, 'PNG', 15, 15, 25, 25);
+                } catch (error) {
+                    console.error('Error al agregar logo al PDF:', error);
+                    drawDefaultLogo(doc);
+                }
+            } else {
+                drawDefaultLogo(doc);
+            }
 
-        doc.setFontSize(9);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Sistema de Gestión Financiera', 45, 40);
+            // Información de la empresa
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(14);
+            doc.setFont('helvetica', 'bold');
+            doc.text(companyName, 50, 22);
 
-        doc.setTextColor(200, 200, 200);
-        doc.setFontSize(8);
-        doc.text(`Reporte Financiero`, 155, 25);
-        doc.text(`Período: ${document.getElementById('filterStartDate').value} al ${document.getElementById('filterEndDate').value}`, 155, 35);
-        doc.text(`Agrupado por: ${groupBy === 'year' ? 'Año' : groupBy === 'month' ? 'Mes' : 'Trimestre'}`, 155, 45);
+            doc.setFontSize(9);
+            doc.setFont('helvetica', 'normal');
 
-        yPos = 70;
+            let infoY = 28;
+            if (businessName) {
+                doc.text(businessName, 50, infoY);
+                infoY += 5;
+            }
+            if (taxId) {
+                doc.text(`RIF: ${taxId}`, 50, infoY);
+            }
+
+            // Información del reporte
+            doc.setFontSize(8);
+            doc.setTextColor(200, 200, 200);
+            doc.text('REPORTE FINANCIERO', 190, 18, { align: 'right' });
+            doc.text(`Período: ${startDate} al ${endDate}`, 190, 23, { align: 'right' });
+            doc.text(`Agrupado por: ${groupBy === 'year' ? 'Año' : groupBy === 'month' ? 'Mes' : 'Trimestre'}`, 190, 28, { align: 'right' });
+            doc.text(`Generado: ${new Date().toLocaleString('es-ES')}`, 190, 33, { align: 'right' });
+
+            // Línea separadora
+            doc.setDrawColor(200, 200, 200);
+            doc.line(MARGIN.left, 52, MARGIN.right, 52);
+
+            return MARGIN.top;
+        };
+
+        const drawDefaultLogo = (doc) => {
+            doc.setFillColor(255, 193, 7);
+            doc.circle(25, 25, 12, 'F');
+            doc.setTextColor(25, 42, 86);
+            doc.setFontSize(14);
+            doc.setFont('helvetica', 'bold');
+            doc.text('FC', 21, 30);
+        };
+
+        const drawFooter = (pageNumber, totalPages) => {
+            doc.setPage(pageNumber);
+            doc.setDrawColor(200, 200, 200);
+            doc.line(MARGIN.left, 285, MARGIN.right, 285);
+            doc.setFontSize(8);
+            doc.setTextColor(150, 150, 150);
+            doc.text(`${companyName} - Sistema de Gestión Financiera`, MARGIN.left, 292);
+            doc.text(`Página ${pageNumber} de ${totalPages}`, MARGIN.right, 292, { align: 'right' });
+        };
+
+        let currentY = MARGIN.top;
+        let currentPage = 1;
+        let totalPages = 1;
+
+        const checkPageBreak = (additionalHeight = 0) => {
+            if (currentY + additionalHeight > MARGIN.bottom) {
+                drawFooter(currentPage, totalPages);
+                currentPage++;
+                totalPages++;
+                doc.addPage();
+                currentY = drawHeader(currentPage);
+            }
+            return currentY;
+        };
+
+        // Dibujar primera página
+        currentY = drawHeader(1);
 
         // ============================================
         // RESUMEN GENERAL
@@ -715,47 +900,39 @@ export const reportsModule = {
 
         // Tarjeta Ingresos
         doc.setFillColor(40, 167, 69);
-        doc.roundedRect(20, yPos, 55, 28, 4, 4, 'F');
+        doc.roundedRect(MARGIN.left, currentY, 55, 28, 4, 4, 'F');
         doc.setTextColor(255, 255, 255);
         doc.setFontSize(9);
-        doc.text('TOTAL INGRESOS', 25, yPos + 10);
-        doc.setFontSize(14);
-        doc.text(formatCurrency(totalIncome), 25, yPos + 23);
+        doc.text('TOTAL INGRESOS', MARGIN.left + 5, currentY + 10);
+        doc.setFontSize(12);
+        doc.text(formatCurrency(totalIncome), MARGIN.left + 5, currentY + 23);
 
         // Tarjeta Egresos
         doc.setFillColor(220, 53, 69);
-        doc.roundedRect(77, yPos, 55, 28, 4, 4, 'F');
+        doc.roundedRect(MARGIN.left + 57, currentY, 55, 28, 4, 4, 'F');
         doc.setTextColor(255, 255, 255);
         doc.setFontSize(9);
-        doc.text('TOTAL EGRESOS', 82, yPos + 10);
-        doc.setFontSize(14);
-        doc.text(formatCurrency(totalExpense), 82, yPos + 23);
+        doc.text('TOTAL EGRESOS', MARGIN.left + 62, currentY + 10);
+        doc.setFontSize(12);
+        doc.text(formatCurrency(totalExpense), MARGIN.left + 62, currentY + 23);
 
         // Tarjeta Balance
-        let r, g, b;
-        if (totalBalance >= 0) {
-            r = 13; g = 110; b = 253;
-        } else {
-            r = 255; g = 193; b = 7;
-        }
-        doc.setFillColor(r, g, b);
-        doc.roundedRect(134, yPos, 55, 28, 4, 4, 'F');
+        const balanceColor = totalBalance >= 0 ? [13, 110, 253] : [255, 193, 7];
+        doc.setFillColor(balanceColor[0], balanceColor[1], balanceColor[2]);
+        doc.roundedRect(MARGIN.left + 114, currentY, 55, 28, 4, 4, 'F');
         doc.setTextColor(255, 255, 255);
         doc.setFontSize(9);
-        doc.text('BALANCE NETO', 139, yPos + 10);
-        doc.setFontSize(14);
-        doc.text(formatCurrency(totalBalance), 139, yPos + 23);
+        doc.text('BALANCE NETO', MARGIN.left + 119, currentY + 10);
+        doc.setFontSize(12);
+        doc.text(formatCurrency(totalBalance), MARGIN.left + 119, currentY + 23);
 
-        yPos += 38;
+        currentY += 38;
 
         // ============================================
         // DETALLE POR PERÍODO
         // ============================================
         for (const period of this.reportData) {
-            if (yPos > 230) {
-                doc.addPage();
-                yPos = 20;
-            }
+            currentY = checkPageBreak(50);
 
             let periodTitle = '';
             if (groupBy === 'year') {
@@ -767,154 +944,153 @@ export const reportsModule = {
             }
 
             doc.setFillColor(52, 58, 64);
-            doc.roundedRect(20, yPos, 170, 12, 4, 4, 'F');
+            doc.roundedRect(MARGIN.left, currentY, 170, 12, 4, 4, 'F');
             doc.setTextColor(255, 255, 255);
             doc.setFontSize(11);
-            doc.text(periodTitle, 25, yPos + 9);
-            yPos += 16;
+            doc.text(periodTitle, MARGIN.left + 5, currentY + 9);
+            currentY += 16;
 
             doc.setTextColor(0, 0, 0);
             doc.setFontSize(9);
-            doc.text(`Ingresos: ${formatCurrency(period.totalIncome)}`, 25, yPos);
-            doc.text(`Egresos: ${formatCurrency(period.totalExpense)}`, 85, yPos);
-            doc.text(`Balance: ${formatCurrency(period.totalIncome - period.totalExpense)}`, 145, yPos);
-            yPos += 10;
-
-            const incomeRows = Object.entries(period.incomeByAccount).length;
-            const expenseRows = Object.entries(period.expenseByAccount).length;
-            const maxRows = Math.max(incomeRows, expenseRows, 3);
-
-            // Tabla INGRESOS
-            const startYIncome = yPos;
-
-            doc.setFillColor(40, 167, 69);
-            doc.roundedRect(20, yPos, 80, 8, 3, 3, 'F');
-            doc.setTextColor(255, 255, 255);
-            doc.setFontSize(8);
-            doc.text('INGRESOS POR CUENTA', 25, yPos + 6);
-            yPos += 8;
-
-            doc.setFillColor(240, 240, 240);
-            doc.rect(20, yPos, 80, 6, 'F');
-            doc.setDrawColor(0, 0, 0);
-            doc.rect(20, yPos, 80, 6, 'S');
-            doc.setTextColor(0, 0, 0);
-            doc.setFontSize(7);
-            doc.text('Cuenta', 25, yPos + 4);
-            doc.text('Monto', 70, yPos + 4);
-            doc.text('%', 92, yPos + 4);
-            yPos += 6;
+            doc.text(`Ingresos: ${formatCurrency(period.totalIncome)}`, MARGIN.left, currentY);
+            doc.text(`Egresos: ${formatCurrency(period.totalExpense)}`, MARGIN.left + 70, currentY);
+            doc.text(`Balance: ${formatCurrency(period.totalIncome - period.totalExpense)}`, MARGIN.left + 140, currentY);
+            currentY += 10;
 
             const incomeEntries = Object.entries(period.incomeByAccount);
+            const expenseEntries = Object.entries(period.expenseByAccount);
+            const maxRows = Math.max(incomeEntries.length, expenseEntries.length, 3);
+            const tableHeight = (maxRows + 2) * 6 + 16;
+
+            currentY = checkPageBreak(tableHeight);
+
+            // Tabla INGRESOS
+            const startYIncome = currentY;
+
+            doc.setFillColor(40, 167, 69);
+            doc.roundedRect(MARGIN.left, currentY, 80, 8, 3, 3, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(8);
+            doc.text('INGRESOS POR CUENTA', MARGIN.left + 5, currentY + 6);
+            currentY += 8;
+
+            doc.setFillColor(240, 240, 240);
+            doc.rect(MARGIN.left, currentY, 80, 6, 'F');
+            doc.setDrawColor(0, 0, 0);
+            doc.rect(MARGIN.left, currentY, 80, 6, 'S');
+            doc.setTextColor(0, 0, 0);
+            doc.setFontSize(7);
+            doc.text('Cuenta', MARGIN.left + 5, currentY + 4);
+            doc.text('Monto', MARGIN.left + 50, currentY + 4);
+            doc.text('%', MARGIN.left + 72, currentY + 4);
+            currentY += 6;
+
             if (incomeEntries.length === 0) {
                 doc.setFillColor(255, 255, 255);
-                doc.rect(20, yPos, 80, 6, 'F');
-                doc.rect(20, yPos, 80, 6, 'S');
-                doc.text('No hay ingresos', 25, yPos + 4);
-                yPos += 6;
+                doc.rect(MARGIN.left, currentY, 80, 6, 'F');
+                doc.rect(MARGIN.left, currentY, 80, 6, 'S');
+                doc.text('No hay ingresos', MARGIN.left + 5, currentY + 4);
+                currentY += 6;
             } else {
                 for (const [account, amount] of incomeEntries) {
                     const percent = period.totalIncome > 0 ? ((amount / period.totalIncome) * 100).toFixed(1) : 0;
-                    const shortAccount = account.length > 22 ? account.substring(0, 19) + '...' : account;
+                    const shortAccount = account.length > 20 ? account.substring(0, 17) + '...' : account;
 
                     doc.setFillColor(255, 255, 255);
-                    doc.rect(20, yPos, 80, 6, 'F');
+                    doc.rect(MARGIN.left, currentY, 80, 6, 'F');
                     doc.setDrawColor(200, 200, 200);
-                    doc.rect(20, yPos, 80, 6, 'S');
+                    doc.rect(MARGIN.left, currentY, 80, 6, 'S');
                     doc.setTextColor(0, 0, 0);
-                    doc.text(shortAccount, 25, yPos + 4);
-                    doc.text(formatCurrency(amount), 70, yPos + 4);
-                    doc.text(`${percent}%`, 92, yPos + 4);
-                    yPos += 6;
+                    doc.text(shortAccount, MARGIN.left + 5, currentY + 4);
+                    doc.text(formatCurrency(amount), MARGIN.left + 50, currentY + 4);
+                    doc.text(`${percent}%`, MARGIN.left + 72, currentY + 4);
+                    currentY += 6;
                 }
             }
 
-            const currentIncomeRows = incomeEntries.length === 0 ? 1 : incomeEntries.length;
-            for (let i = 0; i < maxRows - currentIncomeRows; i++) {
+            for (let i = 0; i < maxRows - (incomeEntries.length || 1); i++) {
                 doc.setFillColor(255, 255, 255);
-                doc.rect(20, yPos, 80, 6, 'F');
+                doc.rect(MARGIN.left, currentY, 80, 6, 'F');
                 doc.setDrawColor(200, 200, 200);
-                doc.rect(20, yPos, 80, 6, 'S');
+                doc.rect(MARGIN.left, currentY, 80, 6, 'S');
                 doc.setTextColor(200, 200, 200);
-                doc.text('-', 25, yPos + 4);
-                yPos += 6;
+                doc.text('-', MARGIN.left + 5, currentY + 4);
+                currentY += 6;
             }
 
             doc.setFillColor(40, 167, 69);
-            doc.rect(20, yPos, 80, 7, 'F');
+            doc.rect(MARGIN.left, currentY, 80, 7, 'F');
             doc.setTextColor(255, 255, 255);
             doc.setFontSize(8);
-            doc.text('TOTAL', 25, yPos + 5);
-            doc.text(formatCurrency(period.totalIncome), 70, yPos + 5);
-            doc.text('100%', 92, yPos + 5);
+            doc.text('TOTAL', MARGIN.left + 5, currentY + 5);
+            doc.text(formatCurrency(period.totalIncome), MARGIN.left + 50, currentY + 5);
+            doc.text('100%', MARGIN.left + 72, currentY + 5);
 
-            const endYIncome = yPos + 7;
-            yPos = startYIncome;
+            const endYIncome = currentY + 7;
+            currentY = startYIncome;
 
             // Tabla EGRESOS
             doc.setFillColor(220, 53, 69);
-            doc.roundedRect(105, yPos, 85, 8, 3, 3, 'F');
+            doc.roundedRect(MARGIN.left + 85, currentY, 85, 8, 3, 3, 'F');
             doc.setTextColor(255, 255, 255);
             doc.setFontSize(8);
-            doc.text('EGRESOS POR CUENTA', 110, yPos + 6);
-            yPos += 8;
+            doc.text('EGRESOS POR CUENTA', MARGIN.left + 90, currentY + 6);
+            currentY += 8;
 
             doc.setFillColor(240, 240, 240);
-            doc.rect(105, yPos, 85, 6, 'F');
+            doc.rect(MARGIN.left + 85, currentY, 85, 6, 'F');
             doc.setDrawColor(0, 0, 0);
-            doc.rect(105, yPos, 85, 6, 'S');
+            doc.rect(MARGIN.left + 85, currentY, 85, 6, 'S');
             doc.setTextColor(0, 0, 0);
             doc.setFontSize(7);
-            doc.text('Cuenta', 110, yPos + 4);
-            doc.text('Monto', 155, yPos + 4);
-            doc.text('%', 180, yPos + 4);
-            yPos += 6;
+            doc.text('Cuenta', MARGIN.left + 90, currentY + 4);
+            doc.text('Monto', MARGIN.left + 135, currentY + 4);
+            doc.text('%', MARGIN.left + 160, currentY + 4);
+            currentY += 6;
 
-            const expenseEntries = Object.entries(period.expenseByAccount);
             if (expenseEntries.length === 0) {
                 doc.setFillColor(255, 255, 255);
-                doc.rect(105, yPos, 85, 6, 'F');
-                doc.rect(105, yPos, 85, 6, 'S');
-                doc.text('No hay egresos', 110, yPos + 4);
-                yPos += 6;
+                doc.rect(MARGIN.left + 85, currentY, 85, 6, 'F');
+                doc.rect(MARGIN.left + 85, currentY, 85, 6, 'S');
+                doc.text('No hay egresos', MARGIN.left + 90, currentY + 4);
+                currentY += 6;
             } else {
                 for (const [account, amount] of expenseEntries) {
                     const percent = period.totalExpense > 0 ? ((amount / period.totalExpense) * 100).toFixed(1) : 0;
-                    const shortAccount = account.length > 22 ? account.substring(0, 19) + '...' : account;
+                    const shortAccount = account.length > 20 ? account.substring(0, 17) + '...' : account;
 
                     doc.setFillColor(255, 255, 255);
-                    doc.rect(105, yPos, 85, 6, 'F');
+                    doc.rect(MARGIN.left + 85, currentY, 85, 6, 'F');
                     doc.setDrawColor(200, 200, 200);
-                    doc.rect(105, yPos, 85, 6, 'S');
+                    doc.rect(MARGIN.left + 85, currentY, 85, 6, 'S');
                     doc.setTextColor(0, 0, 0);
-                    doc.text(shortAccount, 110, yPos + 4);
-                    doc.text(formatCurrency(amount), 155, yPos + 4);
-                    doc.text(`${percent}%`, 180, yPos + 4);
-                    yPos += 6;
+                    doc.text(shortAccount, MARGIN.left + 90, currentY + 4);
+                    doc.text(formatCurrency(amount), MARGIN.left + 135, currentY + 4);
+                    doc.text(`${percent}%`, MARGIN.left + 160, currentY + 4);
+                    currentY += 6;
                 }
             }
 
-            const currentExpenseRows = expenseEntries.length === 0 ? 1 : expenseEntries.length;
-            for (let i = 0; i < maxRows - currentExpenseRows; i++) {
+            for (let i = 0; i < maxRows - (expenseEntries.length || 1); i++) {
                 doc.setFillColor(255, 255, 255);
-                doc.rect(105, yPos, 85, 6, 'F');
+                doc.rect(MARGIN.left + 85, currentY, 85, 6, 'F');
                 doc.setDrawColor(200, 200, 200);
-                doc.rect(105, yPos, 85, 6, 'S');
+                doc.rect(MARGIN.left + 85, currentY, 85, 6, 'S');
                 doc.setTextColor(200, 200, 200);
-                doc.text('-', 110, yPos + 4);
-                yPos += 6;
+                doc.text('-', MARGIN.left + 90, currentY + 4);
+                currentY += 6;
             }
 
             doc.setFillColor(220, 53, 69);
-            doc.rect(105, yPos, 85, 7, 'F');
+            doc.rect(MARGIN.left + 85, currentY, 85, 7, 'F');
             doc.setTextColor(255, 255, 255);
             doc.setFontSize(8);
-            doc.text('TOTAL', 110, yPos + 5);
-            doc.text(formatCurrency(period.totalExpense), 155, yPos + 5);
-            doc.text('100%', 180, yPos + 5);
+            doc.text('TOTAL', MARGIN.left + 90, currentY + 5);
+            doc.text(formatCurrency(period.totalExpense), MARGIN.left + 135, currentY + 5);
+            doc.text('100%', MARGIN.left + 160, currentY + 5);
 
-            const endYExpense = yPos + 7;
-            yPos = Math.max(endYIncome, endYExpense) + 8;
+            const endYExpense = currentY + 7;
+            currentY = Math.max(endYIncome, endYExpense) + 10;
         }
 
         // ============================================
@@ -922,64 +1098,53 @@ export const reportsModule = {
         // ============================================
         const chartCanvas = document.getElementById('financialChart');
         if (chartCanvas && this.reportData.length > 0) {
+            currentPage++;
+            totalPages++;
             doc.addPage();
+            drawHeader(currentPage);
 
-            doc.setFillColor(25, 42, 86);
-            doc.rect(0, 0, 210, 35, 'F');
+            doc.setFillColor(52, 58, 64);
+            doc.roundedRect(MARGIN.left, MARGIN.top, 170, 12, 4, 4, 'F');
             doc.setTextColor(255, 255, 255);
-            doc.setFontSize(14);
-            doc.text('Evolución de Ingresos vs Egresos', 20, 23);
+            doc.setFontSize(11);
+            doc.text('Evolución de Ingresos vs Egresos', MARGIN.left + 5, MARGIN.top + 9);
 
             doc.setDrawColor(200, 200, 200);
-            doc.roundedRect(15, 45, 180, 90, 5, 5, 'S');
+            doc.roundedRect(MARGIN.left, MARGIN.top + 18, 170, 85, 5, 5, 'S');
 
             try {
                 await new Promise(resolve => setTimeout(resolve, 200));
                 const chartImage = chartCanvas.toDataURL('image/png');
-                doc.addImage(chartImage, 'PNG', 20, 50, 170, 80);
+                doc.addImage(chartImage, 'PNG', MARGIN.left + 5, MARGIN.top + 23, 160, 75);
 
                 doc.setFontSize(8);
                 doc.setTextColor(100, 100, 100);
-                doc.text('* Valores expresados en moneda base del sistema', 20, 145);
-                doc.text(`Generado automáticamente por FlowControl - ${new Date().toLocaleString()}`, 20, 153);
+                doc.text('* Valores expresados en moneda base del sistema', MARGIN.left, MARGIN.top + 115);
+                doc.text(`Generado automáticamente por FlowControl - ${new Date().toLocaleString('es-ES')}`, MARGIN.left, MARGIN.top + 123);
             } catch (error) {
                 console.error('Error capturing chart:', error);
                 doc.setTextColor(0, 0, 0);
-                doc.text('No se pudo capturar la gráfica', 20, 70);
+                doc.text('No se pudo capturar la gráfica', MARGIN.left + 5, MARGIN.top + 50);
             }
         }
 
-        // ============================================
-        // PIE DE PÁGINA
-        // ============================================
-        const totalPages = doc.internal.getNumberOfPages();
+        // Pies de página
         for (let i = 1; i <= totalPages; i++) {
-            doc.setPage(i);
-            doc.setDrawColor(200, 200, 200);
-            doc.line(20, 280, 190, 280);
-            doc.setFontSize(8);
-            doc.setTextColor(150, 150, 150);
-            doc.text(`FlowControl - Sistema de Gestión Financiera`, 20, 287);
-            doc.text(`Página ${i} de ${totalPages}`, 170, 287);
+            drawFooter(i, totalPages);
         }
 
-        // ============================================
-        // MARCA DE AGUA (sin rotate)
-        // ============================================
-        /* for (let i = 1; i <= totalPages; i++) {
-            doc.setPage(i);
-            doc.setFontSize(45);
-            doc.setTextColor(230, 230, 230);
-            doc.setFont('helvetica', 'italic');
-            doc.text('FlowControl', 55, 150);
-            doc.setTextColor(0, 0, 0);
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(10);
-        } */
-
-        doc.save(`reporte_financiero_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.pdf`);
+        const fileName = `reporte_financiero_${companyName.replace(/\s/g, '_')}_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.pdf`;
+        doc.save(fileName);
     },
 
+    drawDefaultLogo(doc) {
+        doc.setFillColor(255, 193, 7);
+        doc.circle(25, 27, 12, 'F');
+        doc.setTextColor(25, 42, 86);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text('FC', 21, 32);
+    },
 
     setupEventListeners() {
         const applyBtn = document.getElementById('applyFiltersBtn');
@@ -995,6 +1160,11 @@ export const reportsModule = {
         const exportPdfBtn = document.getElementById('exportPdfBtn');
         if (exportPdfBtn) {
             exportPdfBtn.addEventListener('click', () => this.exportToPdf());
+        }
+
+        const companySelect = document.getElementById('companySelect');
+        if (companySelect) {
+            companySelect.addEventListener('change', () => this.generateReport());
         }
     }
 };

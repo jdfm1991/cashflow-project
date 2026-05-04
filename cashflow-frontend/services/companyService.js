@@ -11,10 +11,10 @@ export const companyService = {
     async getAll(filters = {}) {
         try {
             const params = new URLSearchParams();
-            
+
             if (filters.status) params.append('status', filters.status);
             if (filters.search) params.append('search', filters.search);
-            
+
             const url = `api/companies${params.toString() ? '?' + params.toString() : ''}`;
             const response = await api.get(url);
             return response;
@@ -126,7 +126,7 @@ export const companyService = {
             // Usar el endpoint público o el normal con filtro
             // Dependiendo de si el usuario está autenticado o no
             const user = api.getUser();
-            
+
             if (user?.role === 'super_admin') {
                 return await this.getAll({ status: 'active' });
             } else {
@@ -159,5 +159,32 @@ export const companyService = {
             business_name: company.business_name,
             tax_id: company.tax_id
         }));
+    },
+
+    /**
+     * Obtener URL del logo de la empresa
+     */
+    getLogoUrl(companyId) {
+        if (!companyId) return null;
+        return `${api.baseUrl}/api/companies/${companyId}/logo?t=${Date.now()}`; // timestamp para evitar caché
+    },
+
+    /**
+     * Subir logo de empresa
+     */
+    async uploadLogo(companyId, file) {
+        const formData = new FormData();
+        formData.append('logo', file);
+
+        const response = await api.uploadFile(`api/companies/${companyId}/logo`, formData);
+        return response;
+    },
+
+    /**
+     * Eliminar logo
+     */
+    async deleteLogo(companyId) {
+        const response = await api.delete(`api/companies/${companyId}/logo`);
+        return response;
     }
 };

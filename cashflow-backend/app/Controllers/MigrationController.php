@@ -512,6 +512,7 @@ class MigrationController
 
         error_log("=== MIGRATION EXECUTE ===");
         error_log("User Role: " . $userRole);
+        error_log("Raw input: " . $rawInput);
 
         $validator = new Validator($data ?? []);
         $validator->required('session_id');
@@ -531,6 +532,15 @@ class MigrationController
             Response::notFound('No se encontraron transacciones para esta sesión');
             return;
         }
+
+        // ✅ Obtener IDs reales en el orden de las transacciones
+        $realIds = array_column($transactions, 'id');
+        $totalTransactions = count($transactions);
+
+        error_log("=== DIAGNÓSTICO DE MAPPINGS ===");
+        error_log("Session ID: " . $data['session_id']);
+        error_log("Total transacciones: " . $totalTransactions);
+        error_log("IDs reales (primeros 10): " . json_encode(array_slice($realIds, 0, 10)));
 
         // ✅ Verificar permisos de la conexión
         $connection = $this->connectionModel->find($data['connection_id']);
@@ -567,20 +577,49 @@ class MigrationController
         }
 
         // Configurar cuentas por defecto
-        $defaultIncomeAccountId = 3;
-        $defaultExpenseAccountId = 8;
+        $defaultIncomeAccountId = 3;   // Cambia por el ID real de tu cuenta de ingresos por defecto
+        $defaultExpenseAccountId = 8;  // Cambia por el ID real de tu cuenta de egresos por defecto
 
-        // Construir mapa de mappings
+        // ✅ OPCIÓN 4: Construir mapa de mappings usando el ÍNDICE del array
         $mappingsMap = [];
-        if (!empty($data['mappings']) && is_array($data['mappings'])) {
-            foreach ($data['mappings'] as $mapping) {
+        $mappingsReceived = $data['mappings'] ?? [];
+
+        error_log("Mappings recibidos del frontend: " . count($mappingsReceived));
+
+        foreach ($mappingsReceived as $index => $mapping) {
+            // Obtener account_id de diferentes estructuras posibles
+            $accountId = null;
+            if (is_array($mapping)) {
+                $accountId = $mapping['account_id'] ?? null;
+            } elseif (is_object($mapping)) {
+                $accountId = $mapping->account_id ?? null;
+            } elseif (is_numeric($mapping)) {
+                $accountId = $mapping;
+            }
+
+            // Si hay un account_id válido y existe un ID real en esa posición
+            if ($accountId && isset($realIds[$index])) {
+                $mappingsMap[$realIds[$index]] = (int) $accountId;
+                error_log("Mapeo #{$index}: índice {$index} → ID real {$realIds[$index]} → Cuenta {$accountId}");
+            } else {
+                error_log("Mapeo #{$index}: No se pudo mapear - accountId: {$accountId}, realId: " . ($realIds[$index] ?? 'null'));
+            }
+        }
+
+        // ✅ También soportar mappings por ID directo (por si el frontend envía IDs reales)
+        foreach ($mappingsReceived as $mapping) {
+            if (is_array($mapping)) {
                 $transId = $mapping['transaction_id'] ?? null;
                 $accId = $mapping['account_id'] ?? null;
-                if ($transId && $accId) {
+                if ($transId && $accId && !isset($mappingsMap[$transId])) {
                     $mappingsMap[(int)$transId] = (int)$accId;
+                    error_log("Mapeo directo por ID: {$transId} → Cuenta {$accId}");
                 }
             }
         }
+
+        error_log("Mapa de mappings final: " . json_encode($mappingsMap));
+        error_log("IDs con mapeo: " . count($mappingsMap) . " de {$totalTransactions}");
 
         $currencyService = new \App\Services\CurrencyService();
         $baseCurrency = $currencyService->getBaseCurrency();
@@ -591,20 +630,26 @@ class MigrationController
         $failed = 0;
         $errors = [];
 
-        foreach ($transactions as $transaction) {
+        foreach ($transactions as $index => $transaction) {
             $transactionId = (int) $transaction['id'];
             $type = $transaction['transaction_type'];
             $amount = (float) $transaction['amount'];
 
+            // ✅ Buscar cuenta en el mapa de mappings
             if (isset($mappingsMap[$transactionId])) {
                 $accountId = $mappingsMap[$transactionId];
+                error_log("Transacción {$transactionId} (índice {$index}): Usando cuenta mapeada ID {$accountId}");
             } else {
+                // Usar cuenta por defecto según el tipo
                 $accountId = ($type === 'income') ? $defaultIncomeAccountId : $defaultExpenseAccountId;
+                error_log("Transacción {$transactionId} (índice {$index}): Usando cuenta por defecto ID {$accountId} (tipo: {$type})");
             }
 
+            // Verificar duplicado
             if ($this->transactionExists($companyId, $transaction)) {
                 $duplicated++;
                 $this->importedModel->markAsProcessed($transactionId, $accountId);
+                error_log("Transacción {$transactionId}: Duplicada, omitida");
                 continue;
             }
 
@@ -634,18 +679,22 @@ class MigrationController
                 if ($result) {
                     $this->importedModel->markAsProcessed($transactionId, $accountId);
                     $imported++;
+                    error_log("Transacción {$transactionId}: ✅ Importada exitosamente");
                 } else {
                     $failed++;
                     $errors[] = "Transacción ID {$transactionId}: Error al guardar";
+                    error_log("Transacción {$transactionId}: ❌ Error al guardar");
                 }
             } catch (\Exception $e) {
                 $failed++;
                 $errors[] = "Transacción ID {$transactionId}: " . $e->getMessage();
+                error_log("Transacción {$transactionId}: ❌ Excepción - " . $e->getMessage());
             }
         }
 
+        // Actualizar log
         $this->logModel->updateLog($logId, [
-            'total_records' => count($transactions),
+            'total_records' => $totalTransactions,
             'imported_records' => $imported,
             'duplicated_records' => $duplicated,
             'failed_records' => $failed,
@@ -655,6 +704,9 @@ class MigrationController
         ]);
 
         $message = "Migración completada: {$imported} importadas, {$duplicated} duplicadas, {$failed} fallidas";
+
+        error_log("=== MIGRATION EXECUTE COMPLETED ===");
+        error_log($message);
 
         Response::success([
             'imported' => $imported,

@@ -360,4 +360,130 @@ class CompanyController
 
         Response::success($companies);
     }
+
+    // app/Controllers/CompanyController.php
+
+    public function getLogo(int $id): void
+    {
+        $company = $this->companyModel->find($id);
+
+        if (!$company || !$company['logo']) {
+            Response::notFound('Logo no encontrado');
+            return;
+        }
+
+        $logoPath = STORAGE_PATH . '/uploads/logos/' . $company['logo'];
+
+        if (!file_exists($logoPath)) {
+            Response::notFound('Archivo de logo no encontrado');
+            return;
+        }
+
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mimeType = finfo_file($finfo, $logoPath);
+        finfo_close($finfo);
+
+        header('Content-Type: ' . $mimeType);
+        header('Content-Length: ' . filesize($logoPath));
+        readfile($logoPath);
+        exit();
+    }
+
+    // app/Controllers/CompanyController.php
+
+    /**
+     * POST /api/companies/{id}/logo
+     * Subir logo de empresa
+     */
+    public function uploadLogo(int $id): void
+    {
+        $userId = $this->getUserId();
+        $userRole = $this->getUserRole($userId);
+
+        $company = $this->companyModel->find($id);
+
+        if (!$company) {
+            Response::notFound('Empresa no encontrada');
+            return;
+        }
+
+        if ($userRole !== 'super_admin' && !$this->isCompanyOwner($userId, $id)) {
+            Response::forbidden('No tienes permisos para modificar esta empresa');
+            return;
+        }
+
+        if (!isset($_FILES['logo']) || $_FILES['logo']['error'] !== UPLOAD_ERR_OK) {
+            Response::error('No se recibió ningún archivo', 400);
+            return;
+        }
+
+        $file = $_FILES['logo'];
+        $allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif'];
+        $maxSize = 2 * 1024 * 1024; // 2MB
+
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mimeType = finfo_file($finfo, $file['tmp_name']);
+        finfo_close($finfo);
+
+        if (!in_array($mimeType, $allowedTypes)) {
+            Response::validationError(['logo' => 'Formato no permitido. Use PNG, JPG o GIF']);
+            return;
+        }
+
+        if ($file['size'] > $maxSize) {
+            Response::validationError(['logo' => 'El logo no debe exceder los 2MB']);
+            return;
+        }
+
+        $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
+        $filename = 'company_' . $id . '_' . time() . '.' . $extension;
+        $uploadPath = STORAGE_PATH . '/uploads/logos/' . $filename;
+
+        if (!move_uploaded_file($file['tmp_name'], $uploadPath)) {
+            Response::error('Error al guardar el logo', 500);
+            return;
+        }
+
+        // Eliminar logo anterior si existe
+        if ($company['logo'] && file_exists(STORAGE_PATH . '/uploads/logos/' . $company['logo'])) {
+            unlink(STORAGE_PATH . '/uploads/logos/' . $company['logo']);
+        }
+
+        $this->companyModel->update($id, ['logo' => $filename]);
+
+        Response::success([
+            'logo_url' => "/api/companies/{$id}/logo",
+            'filename' => $filename
+        ], 'Logo actualizado exitosamente');
+    }
+
+    /**
+     * DELETE /api/companies/{id}/logo
+     * Eliminar logo
+     */
+    public function deleteLogo(int $id): void
+    {
+        $userId = $this->getUserId();
+        $userRole = $this->getUserRole($userId);
+
+        $company = $this->companyModel->find($id);
+
+        if (!$company) {
+            Response::notFound('Empresa no encontrada');
+            return;
+        }
+
+        if ($userRole !== 'super_admin' && !$this->isCompanyOwner($userId, $id)) {
+            Response::forbidden('No tienes permisos');
+            return;
+        }
+
+        if ($company['logo'] && file_exists(STORAGE_PATH . '/uploads/logos/' . $company['logo'])) {
+            unlink(STORAGE_PATH . '/uploads/logos/' . $company['logo']);
+        }
+
+        $this->companyModel->update($id, ['logo' => null]);
+
+        Response::success(null, 'Logo eliminado exitosamente');
+    }
 }
