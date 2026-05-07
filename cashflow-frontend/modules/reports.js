@@ -284,28 +284,49 @@ export const reportsModule = {
         const start = new Date(startDate);
         const end = new Date(endDate);
 
-        // Generar todos los meses en el rango
+        // ✅ Fijar al primer día del mes de inicio
+        start.setDate(1);
+        start.setHours(0, 0, 0, 0);
+
+        // ✅ Fijar al último día del mes de fin
+        const endClone = new Date(end);
+        endClone.setDate(1);
+        endClone.setMonth(endClone.getMonth() + 1);
+        endClone.setDate(0);
+        endClone.setHours(23, 59, 59, 999);
+
+        // ✅ Generar todos los meses en el rango (incluyendo el mes de fin)
         const current = new Date(start);
-        while (current <= end) {
-            const key = `${current.getFullYear()}-${current.getMonth() + 1}`;
+        while (current <= endClone) {
+            const year = current.getFullYear();
+            const month = current.getMonth() + 1;
+            const key = `${year}-${month}`;
+
             months[key] = {
-                year: current.getFullYear(),
-                month: current.getMonth() + 1,
+                year: year,
+                month: month,
                 monthName: current.toLocaleString('es', { month: 'long' }),
                 incomes: [],
                 expenses: [],
                 incomeByAccount: {},
                 expenseByAccount: {},
                 totalIncome: 0,
-                totalExpense: 0
+                totalExpense: 0,
+                // ✅ Guardar orden para mantener secuencia
+                sortKey: current.getTime()
             };
+
+            // Avanzar al siguiente mes
             current.setMonth(current.getMonth() + 1);
         }
 
         // Procesar ingresos
         incomes.forEach(income => {
             const date = new Date(income.date);
-            const key = `${date.getFullYear()}-${date.getMonth() + 1}`;
+            const year = date.getFullYear();
+            const month = date.getMonth() + 1;
+            const key = `${year}-${month}`;
+
             if (months[key]) {
                 months[key].incomes.push(income);
                 months[key].totalIncome += parseFloat(income.amount_base_currency || income.amount);
@@ -321,7 +342,10 @@ export const reportsModule = {
         // Procesar egresos
         expenses.forEach(expense => {
             const date = new Date(expense.date);
-            const key = `${date.getFullYear()}-${date.getMonth() + 1}`;
+            const year = date.getFullYear();
+            const month = date.getMonth() + 1;
+            const key = `${year}-${month}`;
+
             if (months[key]) {
                 months[key].expenses.push(expense);
                 months[key].totalExpense += parseFloat(expense.amount_base_currency || expense.amount);
@@ -334,7 +358,8 @@ export const reportsModule = {
             }
         });
 
-        return Object.values(months);
+        // ✅ Devolver los meses ordenados cronológicamente
+        return Object.values(months).sort((a, b) => a.sortKey - b.sortKey);
     },
 
     groupByQuarter(incomes, expenses, startDate, endDate) {
@@ -342,13 +367,31 @@ export const reportsModule = {
         const start = new Date(startDate);
         const end = new Date(endDate);
 
+        // ✅ Fijar al primer día del trimestre de inicio
+        const startQuarter = Math.floor(start.getMonth() / 3);
+        start.setMonth(startQuarter * 3);
+        start.setDate(1);
+        start.setHours(0, 0, 0, 0);
+
+        // ✅ Fijar al último día del trimestre de fin
+        const endClone = new Date(end);
+        const endQuarter = Math.floor(endClone.getMonth() / 3);
+        endClone.setMonth((endQuarter * 3) + 2);
+        endClone.setDate(1);
+        endClone.setMonth(endClone.getMonth() + 1);
+        endClone.setDate(0);
+        endClone.setHours(23, 59, 59, 999);
+
+        // ✅ Generar todos los trimestres en el rango
         const current = new Date(start);
-        while (current <= end) {
+        while (current <= endClone) {
+            const year = current.getFullYear();
             const quarter = Math.floor(current.getMonth() / 3) + 1;
-            const key = `${current.getFullYear()}-Q${quarter}`;
+            const key = `${year}-Q${quarter}`;
+
             if (!quarters[key]) {
                 quarters[key] = {
-                    year: current.getFullYear(),
+                    year: year,
                     quarter: quarter,
                     quarterName: `${quarter}° Trimestre`,
                     incomes: [],
@@ -356,17 +399,22 @@ export const reportsModule = {
                     incomeByAccount: {},
                     expenseByAccount: {},
                     totalIncome: 0,
-                    totalExpense: 0
+                    totalExpense: 0,
+                    sortKey: current.getTime()
                 };
             }
+
+            // Avanzar al siguiente trimestre
             current.setMonth(current.getMonth() + 3);
         }
 
         // Procesar ingresos
         incomes.forEach(income => {
             const date = new Date(income.date);
+            const year = date.getFullYear();
             const quarter = Math.floor(date.getMonth() / 3) + 1;
-            const key = `${date.getFullYear()}-Q${quarter}`;
+            const key = `${year}-Q${quarter}`;
+
             if (quarters[key]) {
                 quarters[key].incomes.push(income);
                 quarters[key].totalIncome += parseFloat(income.amount_base_currency || income.amount);
@@ -382,8 +430,10 @@ export const reportsModule = {
         // Procesar egresos
         expenses.forEach(expense => {
             const date = new Date(expense.date);
+            const year = date.getFullYear();
             const quarter = Math.floor(date.getMonth() / 3) + 1;
-            const key = `${date.getFullYear()}-Q${quarter}`;
+            const key = `${year}-Q${quarter}`;
+
             if (quarters[key]) {
                 quarters[key].expenses.push(expense);
                 quarters[key].totalExpense += parseFloat(expense.amount_base_currency || expense.amount);
@@ -396,7 +446,8 @@ export const reportsModule = {
             }
         });
 
-        return Object.values(quarters);
+        // ✅ Devolver los trimestres ordenados cronológicamente
+        return Object.values(quarters).sort((a, b) => a.sortKey - b.sortKey);
     },
 
     renderChart(data, groupBy) {
@@ -405,18 +456,17 @@ export const reportsModule = {
         // Verificar si el canvas existe
         let canvas = document.getElementById(canvasId);
         if (!canvas) {
-            // Crear contenedor para la gráfica
             const resultsDiv = document.getElementById('reportResults');
             const chartContainer = document.createElement('div');
             chartContainer.className = 'card shadow-sm mb-4';
             chartContainer.innerHTML = `
-                <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0"><i class="bi bi-graph-up"></i> Evolución de Ingresos vs Egresos</h5>
-                </div>
-                <div class="card-body">
-                    <canvas id="${canvasId}" height="100"></canvas>
-                </div>
-            `;
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-graph-up"></i> Evolución de Ingresos vs Egresos</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="${canvasId}" height="100"></canvas>
+            </div>
+        `;
             resultsDiv.insertBefore(chartContainer, resultsDiv.firstChild);
             canvas = document.getElementById(canvasId);
         }
@@ -426,23 +476,31 @@ export const reportsModule = {
             this.chartInstance.destroy();
         }
 
+        // ✅ Asegurar que los datos están ordenados cronológicamente
+        const sortedData = [...data].sort((a, b) => {
+            if (groupBy === 'year') return a.year - b.year;
+            if (groupBy === 'month') return a.sortKey - b.sortKey;
+            if (groupBy === 'quarter') return a.sortKey - b.sortKey;
+            return 0;
+        });
+
         // Preparar datos para la gráfica
         let labels = [];
         let incomeData = [];
         let expenseData = [];
 
         if (groupBy === 'year') {
-            labels = data.map(d => `${d.year}`);
-            incomeData = data.map(d => d.totalIncome);
-            expenseData = data.map(d => d.totalExpense);
+            labels = sortedData.map(d => `${d.year}`);
+            incomeData = sortedData.map(d => d.totalIncome);
+            expenseData = sortedData.map(d => d.totalExpense);
         } else if (groupBy === 'month') {
-            labels = data.map(d => `${d.monthName.substring(0, 3)} ${d.year}`);
-            incomeData = data.map(d => d.totalIncome);
-            expenseData = data.map(d => d.totalExpense);
+            labels = sortedData.map(d => `${d.monthName.substring(0, 3)} ${d.year}`);
+            incomeData = sortedData.map(d => d.totalIncome);
+            expenseData = sortedData.map(d => d.totalExpense);
         } else {
-            labels = data.map(d => `${d.quarterName} ${d.year}`);
-            incomeData = data.map(d => d.totalIncome);
-            expenseData = data.map(d => d.totalExpense);
+            labels = sortedData.map(d => `${d.quarterName} ${d.year}`);
+            incomeData = sortedData.map(d => d.totalIncome);
+            expenseData = sortedData.map(d => d.totalExpense);
         }
 
         // Crear nueva gráfica
@@ -514,47 +572,55 @@ export const reportsModule = {
             return;
         }
 
+        // ✅ Asegurar que los datos están ordenados cronológicamente
+        const sortedData = [...data].sort((a, b) => {
+            if (groupBy === 'year') return a.year - b.year;
+            if (groupBy === 'month') return a.sortKey - b.sortKey;
+            if (groupBy === 'quarter') return a.sortKey - b.sortKey;
+            return 0;
+        });
+
         // Renderizar gráfica primero
-        this.renderChart(data, groupBy);
+        this.renderChart(sortedData, groupBy);
 
         let html = '';
 
         // Totales generales
-        const totalGeneralIncome = data.reduce((sum, item) => sum + item.totalIncome, 0);
-        const totalGeneralExpense = data.reduce((sum, item) => sum + item.totalExpense, 0);
+        const totalGeneralIncome = sortedData.reduce((sum, item) => sum + item.totalIncome, 0);
+        const totalGeneralExpense = sortedData.reduce((sum, item) => sum + item.totalExpense, 0);
         const totalGeneralBalance = totalGeneralIncome - totalGeneralExpense;
 
         html += `
-            <div class="row mb-4">
-                <div class="col-md-4">
-                    <div class="card bg-success text-white">
-                        <div class="card-body">
-                            <h6 class="card-title">Total Ingresos</h6>
-                            <h3>${formatCurrency(totalGeneralIncome)}</h3>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="card bg-danger text-white">
-                        <div class="card-body">
-                            <h6 class="card-title">Total Egresos</h6>
-                            <h3>${formatCurrency(totalGeneralExpense)}</h3>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="card ${totalGeneralBalance >= 0 ? 'bg-primary' : 'bg-warning'} text-white">
-                        <div class="card-body">
-                            <h6 class="card-title">Balance Neto</h6>
-                            <h3>${formatCurrency(totalGeneralBalance)}</h3>
-                        </div>
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card bg-success text-white">
+                    <div class="card-body">
+                        <h6 class="card-title">Total Ingresos</h6>
+                        <h3>${formatCurrency(totalGeneralIncome)}</h3>
                     </div>
                 </div>
             </div>
-        `;
+            <div class="col-md-4">
+                <div class="card bg-danger text-white">
+                    <div class="card-body">
+                        <h6 class="card-title">Total Egresos</h6>
+                        <h3>${formatCurrency(totalGeneralExpense)}</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card ${totalGeneralBalance >= 0 ? 'bg-primary' : 'bg-warning'} text-white">
+                    <div class="card-body">
+                        <h6 class="card-title">Balance Neto</h6>
+                        <h3>${formatCurrency(totalGeneralBalance)}</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
 
         // Tablas por período
-        for (const period of data) {
+        for (const period of sortedData) {
             const periodTitle = groupBy === 'year' ? `Año ${period.year}` :
                 (groupBy === 'month' ? `${period.monthName} ${period.year}` :
                     `${period.quarterName} ${period.year}`);
@@ -562,108 +628,109 @@ export const reportsModule = {
             const balance = period.totalIncome - period.totalExpense;
 
             html += `
-                <div class="card shadow-sm mb-4">
-                    <div class="card-header bg-secondary text-white">
-                        <h5 class="mb-0">${periodTitle}</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="row mb-3">
-                            <div class="col-md-4">
-                                <strong>Ingresos:</strong> ${formatCurrency(period.totalIncome)}
-                            </div>
-                            <div class="col-md-4">
-                                <strong>Egresos:</strong> ${formatCurrency(period.totalExpense)}
-                            </div>
-                            <div class="col-md-4">
-                                <strong>Balance:</strong> ${formatCurrency(balance)}
-                            </div>
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0">${periodTitle}</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <strong>Ingresos:</strong> ${formatCurrency(period.totalIncome)}
                         </div>
-                        
-                        <div class="row">
-                            <div class="col-md-6">
-                                <h6 class="text-success">Ingresos por Cuenta</h6>
-                                <table class="table table-sm table-bordered">
-                                    <thead>
-                                        <tr>
-                                            <th>Cuenta</th>
-                                            <th class="text-end">Monto</th>
-                                            <th class="text-end">%</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${Object.entries(period.incomeByAccount)
+                        <div class="col-md-4">
+                            <strong>Egresos:</strong> ${formatCurrency(period.totalExpense)}
+                        </div>
+                        <div class="col-md-4">
+                            <strong>Balance:</strong> ${formatCurrency(balance)}
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6 class="text-success">Ingresos por Cuenta</h6>
+                            <table class="table table-sm table-bordered">
+                                <thead>
+                                    <tr>
+                                        <th>Cuenta</th>
+                                        <th class="text-end">Monto</th>
+                                        <th class="text-end">%</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${Object.entries(period.incomeByAccount)
                     .sort((a, b) => b[1] - a[1])
                     .map(([account, amount]) => `
-                                                <tr>
-                                                    <td>${account}</td>
-                                                    <td class="text-end">${formatCurrency(amount)}</td>
-                                                    <td class="text-end">${period.totalIncome > 0 ? ((amount / period.totalIncome) * 100).toFixed(2) : 0}%</td>
-                                                </tr>
-                                            `).join('')}
-                                        ${Object.keys(period.incomeByAccount).length === 0 ? '<tr><td colspan="3" class="text-center">Sin ingresos</td>' : ''}
-                                    </tbody>
-                                    <tfoot>
-                                        <tr class="table-active">
-                                            <td><strong>TOTAL</strong></td>
-                                            <td class="text-end"><strong>${formatCurrency(period.totalIncome)}</strong></td>
-                                            <td class="text-end"><strong>100%</strong></td>
-                                        </tr>
-                                    </tfoot>
-                                </table>
-                            </div>
-                            <div class="col-md-6">
-                                <h6 class="text-danger">Egresos por Cuenta</h6>
-                                <table class="table table-sm table-bordered">
-                                    <thead>
-                                        <tr>
-                                            <th>Cuenta</th>
-                                            <th class="text-end">Monto</th>
-                                            <th class="text-end">%</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${Object.entries(period.expenseByAccount)
+                                                    <tr>
+                                                        <td>${account}</td>
+                                                        <td class="text-end">${formatCurrency(amount)}</td>
+                                                        <td class="text-end">${period.totalIncome > 0 ? ((amount / period.totalIncome) * 100).toFixed(2) : 0}%</td>
+                                                    </tr>
+                                                `).join('')}
+                                    ${Object.keys(period.incomeByAccount).length === 0 ? '<tr><td colspan="3" class="text-center">Sin ingresos</td></tr>' : ''}
+                                </tbody>
+                                <tfoot>
+                                    <tr class="table-active">
+                                        <td><strong>TOTAL</strong></td>
+                                        <td class="text-end"><strong>${formatCurrency(period.totalIncome)}</strong></td>
+                                        <td class="text-end"><strong>100%</strong></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="text-danger">Egresos por Cuenta</h6>
+                            <table class="table table-sm table-bordered">
+                                <thead>
+                                    <tr>
+                                        <th>Cuenta</th>
+                                        <th class="text-end">Monto</th>
+                                        <th class="text-end">%</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${Object.entries(period.expenseByAccount)
                     .sort((a, b) => b[1] - a[1])
                     .map(([account, amount]) => `
-                                                <tr>
-                                                    <td>${account}</td>
-                                                    <td class="text-end">${formatCurrency(amount)}</td>
-                                                    <td class="text-end">${period.totalExpense > 0 ? ((amount / period.totalExpense) * 100).toFixed(2) : 0}%</td>
-                                                </tr>
-                                            `).join('')}
-                                        ${Object.keys(period.expenseByAccount).length === 0 ? '<tr><td colspan="3" class="text-center">Sin egresos</td>' : ''}
-                                    </tbody>
-                                    <tfoot>
-                                        <tr class="table-active">
-                                            <td><strong>TOTAL</strong></td>
-                                            <td class="text-end"><strong>${formatCurrency(period.totalExpense)}</strong></td>
-                                            <td class="text-end"><strong>100%</strong></td>
-                                        </tr>
-                                    </tfoot>
-                                </table>
-                            </div>
+                                                    <tr>
+                                                        <td>${account}</td>
+                                                        <td class="text-end">${formatCurrency(amount)}</td>
+                                                        <td class="text-end">${period.totalExpense > 0 ? ((amount / period.totalExpense) * 100).toFixed(2) : 0}%</td>
+                                                    </tr>
+                                                `).join('')}
+                                    ${Object.keys(period.expenseByAccount).length === 0 ? '<tr><td colspan="3" class="text-center">Sin egresos</td></tr>' : ''}
+                                </tbody>
+                                <tfoot>
+                                    <tr class="table-active">
+                                        <td><strong>TOTAL</strong></td>
+                                        <td class="text-end"><strong>${formatCurrency(period.totalExpense)}</strong></td>
+                                        <td class="text-end"><strong>100%</strong></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
                         </div>
                     </div>
                 </div>
-            `;
+            </div>
+        `;
         }
 
         resultsDiv.innerHTML = html;
+
         // Re-insertar la gráfica al inicio
         const chartContainer = document.createElement('div');
         chartContainer.className = 'card shadow-sm mb-4';
         chartContainer.innerHTML = `
-            <div class="card-header bg-primary text-white">
-                <h5 class="mb-0"><i class="bi bi-graph-up"></i> Evolución de Ingresos vs Egresos</h5>
-            </div>
-            <div class="card-body">
-                <canvas id="financialChart" height="100"></canvas>
-            </div>
-        `;
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0"><i class="bi bi-graph-up"></i> Evolución de Ingresos vs Egresos</h5>
+        </div>
+        <div class="card-body">
+            <canvas id="financialChart" height="100"></canvas>
+        </div>
+    `;
         resultsDiv.insertBefore(chartContainer, resultsDiv.firstChild);
 
-        // Volver a renderizar la gráfica
-        this.renderChart(data, groupBy);
+        // Volver a renderizar la gráfica con datos ordenados
+        this.renderChart(sortedData, groupBy);
     },
 
     exportToExcel() {
@@ -806,7 +873,7 @@ export const reportsModule = {
             doc.setPage(pageNumber);
 
             // Fondo del encabezado
-            doc.setFillColor(25, 42, 86);
+            doc.setFillColor(102, 168, 204);
             doc.rect(0, 0, 210, 50, 'F');
 
             // Logo (usar el precargado o dibujar por defecto)
@@ -823,14 +890,17 @@ export const reportsModule = {
 
             // Información de la empresa
             doc.setTextColor(255, 255, 255);
-            doc.setFontSize(14);
+            doc.setFontSize(12);
             doc.setFont('helvetica', 'bold');
-            doc.text(companyName, 50, 22);
+            doc.text(companyName, 50, 22, {
+                maxWidth: 100, // Ajusta este valor al ancho máximo que permitas (en las unidades de tu doc, ej. mm)
+                align: 'left'   // Opcional: 'left', 'center', 'right', 'justify'
+            });
 
             doc.setFontSize(9);
             doc.setFont('helvetica', 'normal');
 
-            let infoY = 28;
+            let infoY = 33;
             if (businessName) {
                 doc.text(businessName, 50, infoY);
                 infoY += 5;
@@ -841,7 +911,7 @@ export const reportsModule = {
 
             // Información del reporte
             doc.setFontSize(8);
-            doc.setTextColor(200, 200, 200);
+            doc.setTextColor(255, 255, 255);
             doc.text('REPORTE FINANCIERO', 190, 18, { align: 'right' });
             doc.text(`Período: ${startDate} al ${endDate}`, 190, 23, { align: 'right' });
             doc.text(`Agrupado por: ${groupBy === 'year' ? 'Año' : groupBy === 'month' ? 'Mes' : 'Trimestre'}`, 190, 28, { align: 'right' });
