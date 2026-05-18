@@ -48,4 +48,5 @@ class Bank extends BaseModel
         $result = $stmt->fetch();
         return $result ?: null;
     }
+    
 }

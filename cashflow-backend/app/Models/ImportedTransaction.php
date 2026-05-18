@@ -10,6 +10,7 @@ class ImportedTransaction extends BaseModel
     protected $fillable = [
         'company_id',
         'bank_id',
+        'bank_name',     
         'bank_account_id',
         'transaction_date',
         'reference',

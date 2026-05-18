@@ -429,7 +429,6 @@ export const migrationModule = {
         const month = document.getElementById('monthSelect').value;
         const bankId = document.getElementById('bankSelect').value;
 
-        // Depuración: Verificar valores
         console.log('Valores seleccionados:', { connectionId, year, month, bankId });
         console.log('bankId type:', typeof bankId, 'value:', bankId);
 
@@ -438,7 +437,6 @@ export const migrationModule = {
             return;
         }
 
-        // Asegurar que bankId sea un número entero
         const bankIdInt = parseInt(bankId);
         if (isNaN(bankIdInt) || bankIdInt <= 0) {
             showAlert('Seleccione un banco válido', 'warning');
@@ -454,13 +452,23 @@ export const migrationModule = {
                 connection_id: parseInt(connectionId),
                 year: parseInt(year),
                 month: parseInt(month),
-                bank_id: parseInt(bankId)
+                bank_id: bankIdInt
             });
 
             if (response.success && response.data) {
                 this.currentSessionId = response.data.session_id;
                 this.previewData = response.data.preview;
                 this.transactionMappings = {};
+
+                // ✅ Mostrar información del banco encontrado
+                const bankInfo = response.data.bank_info;
+                if (bankInfo) {
+                    if (bankInfo.found) {
+                        showAlert(`✅ Banco identificado: ${bankInfo.internal_name} (ID: ${bankInfo.internal_id})`, 'success');
+                    } else {
+                        showAlert(`⚠️ No se encontró el banco "${bankInfo.external_name}" en el sistema. Las transacciones se guardarán sin banco asociado.`, 'warning');
+                    }
+                }
 
                 this.renderPreviewTable();
                 document.getElementById('mappingPanel').style.display = 'block';

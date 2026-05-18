@@ -29,6 +29,7 @@ export class TransactionModule {
         this.dataTable = null;
         this.currentYear = new Date().getFullYear();
         this._cleanupExchangeRateEvents = null;
+        this.banks = [];
     }
 
     /**
@@ -585,6 +586,20 @@ export class TransactionModule {
             const bsModal = bootstrap.Modal.getInstance(modal);
             bsModal?.hide();
             setTimeout(() => modal.remove(), 300);
+        }
+    }
+
+    /**
+     * Cargar bancos disponibles
+     */
+    async loadBanks() {
+        try {
+            const response = await api.get('api/banks');
+            if (response.success && response.data) {
+                this.banks = response.data.filter(b => b.is_active);
+            }
+        } catch (error) {
+            console.error('Error loading banks:', error);
         }
     }
 }

@@ -12,135 +12,159 @@ class ExpenseModule extends TransactionModule {
         super('expense');
     }
 
-    // Los métodos son prácticamente idénticos a IncomeModule
-    // Podemos importarlos o copiarlos
     async showModal(expense = null) {
-        // ... mismo código que en IncomeModule.showModal
-        // Solo cambia el contexto (this.type = 'expense')
         const isEdit = !!expense;
         const user = api.getUser();
         const isSuperAdmin = user?.role === 'super_admin';
         const config = this.getConfig();
 
+        // ✅ Cargar bancos si no están cargados
+        if (this.banks.length === 0) {
+            await this.loadBanks();
+        }
+
         const modalHtml = `
-            <div class="modal fade" id="transactionModal" tabindex="-1" data-bs-backdrop="static">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content">
-                        <div class="modal-header ${config.headerClass} text-white">
-                            <h5 class="modal-title">
-                                <i class="bi bi-cash-stack"></i> ${isEdit ? 'Editar' : 'Nuevo'} ${config.entityName}
-                            </h5>
-                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        <div class="modal fade" id="transactionModal" tabindex="-1" data-bs-backdrop="static">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header ${config.headerClass} text-white">
+                        <h5 class="modal-title">
+                            <i class="bi bi-cash-stack"></i> ${isEdit ? 'Editar' : 'Nuevo'} ${config.entityName}
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-secondary mb-3">
+                            <i class="bi bi-info-circle"></i>
+                            <strong>Información de conversión:</strong><br>
+                            <small>
+                                • Si selecciona <strong>Moneda Base (${this.baseCurrency?.code})</strong>, el monto se guardará tal cual.<br>
+                                • Si selecciona <strong>otra moneda</strong>, el monto se convertirá automáticamente a ${this.baseCurrency?.code}.<br>
+                                • El campo "Tasa de cambio" muestra la conversión correspondiente.
+                            </small>
                         </div>
-                        <div class="modal-body">
-                            <div class="alert alert-secondary mb-3">
-                                <i class="bi bi-info-circle"></i>
-                                <strong>Información de conversión:</strong><br>
-                                <small>
-                                    • Si selecciona <strong>Moneda Base (${this.baseCurrency?.code})</strong>, el monto se guardará tal cual.<br>
-                                    • Si selecciona <strong>otra moneda</strong>, el monto se convertirá automáticamente a ${this.baseCurrency?.code}.<br>
-                                    • El campo "Tasa de cambio" muestra la conversión correspondiente.
-                                </small>
+                        <form id="transactionForm">
+                            <input type="hidden" id="transactionId" value="${expense?.id || ''}">
+                            ${isSuperAdmin ? `
+                            <div class="row mb-3">
+                                <div class="col-md-12">
+                                    <label class="form-label required">Empresa</label>
+                                    <select class="form-select" id="transactionCompany" required>
+                                        <option value="">Seleccione una empresa</option>
+                                        ${this.companies.map(c => `
+                                            <option value="${c.id}" ${expense?.company_id == c.id ? 'selected' : ''}>${this.escapeHtml(c.name)}</option>
+                                        `).join('')}
+                                    </select>
+                                </div>
                             </div>
-                            <form id="transactionForm">
-                                <input type="hidden" id="transactionId" value="${expense?.id || ''}">
-                                ${isSuperAdmin ? `
-                                <div class="row mb-3">
-                                    <div class="col-md-12">
-                                        <label class="form-label required">Empresa</label>
-                                        <select class="form-select" id="transactionCompany" required>
-                                            <option value="">Seleccione una empresa</option>
-                                            ${this.companies.map(c => `
-                                                <option value="${c.id}" ${expense?.company_id == c.id ? 'selected' : ''}>${this.escapeHtml(c.name)}</option>
-                                            `).join('')}
-                                        </select>
-                                    </div>
+                            ` : ''}
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label required">Fecha</label>
+                                    <input type="date" class="form-control" id="transactionDate" 
+                                           value="${expense?.date || new Date().toISOString().split('T')[0]}" required>
                                 </div>
-                                ` : ''}
-                                <div class="row">
-                                    <div class="col-md-6 mb-3">
-                                        <label class="form-label required">Fecha</label>
-                                        <input type="date" class="form-control" id="transactionDate" 
-                                               value="${expense?.date || new Date().toISOString().split('T')[0]}" required>
-                                    </div>
-                                    <div class="col-md-6 mb-3">
-                                        <label class="form-label required">Cuenta</label>
-                                        <select class="form-select" id="transactionAccount" required>
-                                            <option value="">Seleccione una cuenta</option>
-                                            ${this.accounts.map(acc => `
-                                                <option value="${acc.id}" ${expense?.account_id == acc.id ? 'selected' : ''}>
-                                                    ${this.escapeHtml(acc.name)} ${acc.category ? `(${acc.category})` : ''}
-                                                </option>
-                                            `).join('')}
-                                        </select>
-                                    </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label required">Cuenta</label>
+                                    <select class="form-select" id="transactionAccount" required>
+                                        <option value="">Seleccione una cuenta</option>
+                                        ${this.accounts.map(acc => `
+                                            <option value="${acc.id}" ${expense?.account_id == acc.id ? 'selected' : ''}>
+                                                ${this.escapeHtml(acc.name)} ${acc.category ? `(${acc.category})` : ''}
+                                            </option>
+                                        `).join('')}
+                                    </select>
                                 </div>
-                                <div class="row">
-                                    <div class="col-md-4 mb-3">
-                                        <label class="form-label required">Monto</label>
-                                        <input type="number" step="0.01" class="form-control" id="transactionAmount" 
-                                               value="${expense?.amount || ''}" placeholder="0.00" required>
-                                    </div>
-                                    <div class="col-md-4 mb-3">
-                                        <label class="form-label required">Moneda</label>
-                                        <select class="form-select" id="transactionCurrency" required>
-                                            <option value="">Seleccione una moneda</option>
-                                            ${this.currencies.map(curr => `
-                                                <option value="${curr.id}" ${expense?.currency_id == curr.id ? 'selected' : ''}>
-                                                    ${curr.code} - ${curr.name} (${curr.symbol})
-                                                    ${curr.is_base ? ' [Base]' : ''}
-                                                    ${curr.is_default ? ' [Default]' : ''}
-                                                </option>
-                                            `).join('')}
-                                        </select>
-                                    </div>
-                                    <div class="col-md-4 mb-3">
-                                        <label class="form-label">Tasa de cambio</label>
-                                        <input type="text" class="form-control" id="exchangeRateInfo" readonly placeholder="Se calculará automáticamente">
-                                        <small class="text-muted" id="rateDateInfo"></small>
-                                    </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label required">Monto</label>
+                                    <input type="number" step="0.01" class="form-control" id="transactionAmount" 
+                                           value="${expense?.amount || ''}" placeholder="0.00" required>
                                 </div>
-                                <div class="alert alert-success mb-3" id="baseAmountInfo" style="display: none;">
-                                    <i class="bi bi-currency-exchange"></i>
-                                    <strong>Monto en moneda base (${this.baseCurrency?.code || 'VES'}):</strong>
-                                    <span id="baseAmountDisplay">0.00</span>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label required">Moneda</label>
+                                    <select class="form-select" id="transactionCurrency" required>
+                                        <option value="">Seleccione una moneda</option>
+                                        ${this.currencies.map(curr => `
+                                            <option value="${curr.id}" ${expense?.currency_id == curr.id ? 'selected' : ''}>
+                                                ${curr.code} - ${curr.name} (${curr.symbol})
+                                                ${curr.is_base ? ' [Base]' : ''}
+                                                ${curr.is_default ? ' [Default]' : ''}
+                                            </option>
+                                        `).join('')}
+                                    </select>
                                 </div>
-                                <div class="row">
-                                    <div class="col-md-6 mb-3">
-                                        <label class="form-label">Referencia</label>
-                                        <input type="text" class="form-control" id="transactionReference" 
-                                               value="${expense?.reference || ''}" placeholder="N° de comprobante">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Tasa de cambio</label>
+                                    <div class="input-group">
+                                        <span class="input-group-text bg-success text-white">
+                                            <i class="bi bi-currency-exchange"></i>
+                                        </span>
+                                        <input type="text" class="form-control" id="exchangeRateInfo" 
+                                               readonly placeholder="Se calculará automáticamente">
                                     </div>
-                                    <div class="col-md-6 mb-3">
-                                        <label class="form-label required">Método de Pago</label>
-                                        <select class="form-select" id="transactionPaymentMethod" required>
-                                            <option value="cash" ${expense?.payment_method === 'cash' ? 'selected' : ''}>💵 Efectivo</option>
-                                            <option value="bank" ${expense?.payment_method === 'bank' ? 'selected' : ''}>🏦 Banco</option>
-                                        </select>
-                                    </div>
+                                    <small class="text-muted" id="rateDateInfo"></small>
                                 </div>
-                                <div class="mb-3">
-                                    <label class="form-label">Descripción</label>
-                                    <textarea class="form-control" id="transactionDescription" rows="3" 
-                                              placeholder="Descripción detallada...">${expense?.description || ''}</textarea>
+                            </div>
+                            <div class="alert alert-success mb-3" id="baseAmountInfo" style="display: none;">
+                                <i class="bi bi-currency-exchange"></i>
+                                <strong>Monto en moneda base (${this.baseCurrency?.code || 'VES'}):</strong>
+                                <span id="baseAmountDisplay">0.00</span>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label required">Método de Pago</label>
+                                    <select class="form-select" id="transactionPaymentMethod" required>
+                                        <option value="cash" ${expense?.payment_method === 'cash' ? 'selected' : ''}>💵 Efectivo</option>
+                                        <option value="bank" ${expense?.payment_method === 'bank' ? 'selected' : ''}>🏦 Banco</option>
+                                    </select>
                                 </div>
-                            </form>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                            <button type="button" class="btn ${config.buttonClass}" id="saveTransactionBtn">
-                                ${isEdit ? 'Actualizar' : 'Guardar'}
-                            </button>
-                        </div>
+                                <div class="col-md-6 mb-3" id="bankContainer" style="display: none;">
+                                    <label class="form-label required">
+                                        <i class="bi bi-bank"></i> Banco
+                                    </label>
+                                    <select class="form-select" id="transactionBank">
+                                        <option value="">Seleccione un banco</option>
+                                        ${this.banks.map(bank => `
+                                            <option value="${bank.id}" ${expense?.bank_id == bank.id ? 'selected' : ''}>
+                                                ${this.escapeHtml(bank.name)} ${bank.code ? `(${bank.code})` : ''}
+                                            </option>
+                                        `).join('')}
+                                    </select>
+                                    <small class="text-muted">Requerido para transacciones bancarias</small>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Referencia</label>
+                                <input type="text" class="form-control" id="transactionReference" 
+                                       value="${expense?.reference || ''}" placeholder="N° de comprobante, factura, etc.">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Descripción</label>
+                                <textarea class="form-control" id="transactionDescription" rows="3" 
+                                          placeholder="Descripción detallada...">${expense?.description || ''}</textarea>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="button" class="btn ${config.buttonClass}" id="saveTransactionBtn">
+                            ${isEdit ? 'Actualizar' : 'Guardar'}
+                        </button>
                     </div>
                 </div>
             </div>
-        `;
+        </div>
+    `;
 
         const existingModal = document.getElementById('transactionModal');
         if (existingModal) existingModal.remove();
 
         document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+        // ✅ Configurar eventos del modal
+        this.setupPaymentMethodToggle();
         this.setupExchangeRateEvents();
 
         const modal = new bootstrap.Modal(document.getElementById('transactionModal'));
@@ -150,6 +174,33 @@ class ExpenseModule extends TransactionModule {
             await this.saveTransaction(expense);
             this.closeModal();
         });
+    }
+
+    /**
+     * Configurar el toggle del selector de banco según método de pago
+     */
+    setupPaymentMethodToggle() {
+        const paymentMethodSelect = document.getElementById('transactionPaymentMethod');
+        const bankContainer = document.getElementById('bankContainer');
+        const bankSelect = document.getElementById('transactionBank');
+
+        const toggleBankField = () => {
+            const isBank = paymentMethodSelect?.value === 'bank';
+            if (bankContainer) {
+                bankContainer.style.display = isBank ? 'block' : 'none';
+            }
+            if (bankSelect) {
+                bankSelect.required = isBank;
+                if (!isBank) {
+                    bankSelect.value = '';
+                }
+            }
+        };
+
+        if (paymentMethodSelect) {
+            paymentMethodSelect.addEventListener('change', toggleBankField);
+            toggleBankField(); // Ejecutar al inicio
+        }
     }
 
     setupExchangeRateEvents() {
@@ -259,6 +310,7 @@ class ExpenseModule extends TransactionModule {
             const reference = document.getElementById('transactionReference')?.value;
             const description = document.getElementById('transactionDescription')?.value;
             const paymentMethod = document.getElementById('transactionPaymentMethod')?.value;
+            const bankId = document.getElementById('transactionBank')?.value;
 
             // Validaciones
             if (isSuperAdmin && !companyId) return showAlert('Debe seleccionar una empresa', 'warning');
@@ -266,6 +318,11 @@ class ExpenseModule extends TransactionModule {
             if (!accountId) return showAlert('Debe seleccionar una cuenta', 'warning');
             if (!amount || amount <= 0) return showAlert('El monto debe ser mayor a 0', 'warning');
             if (!currencyId) return showAlert('Debe seleccionar una moneda', 'warning');
+
+            // ✅ Validar banco si es pago bancario
+            if (paymentMethod === 'bank' && !bankId) {
+                return showAlert('Debe seleccionar un banco para transacciones bancarias', 'warning');
+            }
 
             const today = new Date().toISOString().split('T')[0];
             if (date > today) return showAlert('No se puede registrar con fecha futura', 'warning');
@@ -314,7 +371,8 @@ class ExpenseModule extends TransactionModule {
                 date: date,
                 reference: reference || null,
                 description: description || null,
-                payment_method: paymentMethod
+                payment_method: paymentMethod,
+                bank_id: paymentMethod === 'bank' ? parseInt(bankId) : null  // ✅ Incluir bank_id si es bancario
             };
 
             if (isSuperAdmin && companyId) transactionData.company_id = parseInt(companyId);

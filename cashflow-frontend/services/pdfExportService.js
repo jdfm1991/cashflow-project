@@ -89,7 +89,7 @@ export const pdfExportService = {
      * @param {Object} companyInfo - Información de la empresa { name, business_name, tax_id, logo }
      * @param {Array} accounts - Lista de cuentas para obtener categorías
      */
-    exportFinancialReportToPDF(reportData, filters, companyInfo = null, companyLogo = null, accounts = []) {
+    exportFinancialReportToPDF(reportData, filters, companyInfo = null, companyLogo = null, accounts = [], bankBalances = []) {
         if (!reportData || reportData.length === 0) {
             console.warn('No hay datos para exportar');
             return;
@@ -97,20 +97,15 @@ export const pdfExportService = {
 
         const { startDate, endDate, groupBy } = filters;
 
-        // ✅ Depuración: Ver qué está llegando
+        // ✅ Depuración
         console.log('=== PDF Export Debug ===');
-        console.log('companyInfo recibido:', companyInfo);
-        console.log('companyLogo recibido:', companyLogo);
-        console.log('companyInfo type:', typeof companyInfo);
-        console.log('companyInfo keys:', companyInfo ? Object.keys(companyInfo) : 'null');
+        console.log('companyInfo:', companyInfo);
+        console.log('bankBalances:', bankBalances);
 
-        // ✅ Extraer datos de empresa con valores por defecto
         const companyName = companyInfo?.name || 'FlowControl';
         const businessName = companyInfo?.business_name || '';
         const taxId = companyInfo?.tax_id || '';
         const logo = companyLogo || null;
-
-        console.log('Datos extraídos:', { companyName, businessName, taxId, logo });
 
         const totals = this.calculateTotals(reportData);
         const sortedData = [...reportData].sort((a, b) => {
@@ -120,6 +115,17 @@ export const pdfExportService = {
             return 0;
         });
 
+        // ✅ Calcular resumen mensual para la tabla
+        const monthlySummary = this.calculateMonthlySummary(sortedData, groupBy);
+
+        // ✅ Calcular ganancias/pérdidas mensuales
+        const monthlyProfitLoss = monthlySummary.map(month => ({
+            period: month.period,
+            income: month.totalIncome,
+            expense: month.totalExpense,
+            profitLoss: month.totalIncome - month.totalExpense
+        }));
+
         const reportHtml = this.generateFinancialReportHTML(sortedData, {
             startDate,
             endDate,
@@ -128,7 +134,10 @@ export const pdfExportService = {
             businessName,
             taxId,
             logo,
-            totals
+            totals,
+            monthlySummary,
+            monthlyProfitLoss,
+            bankBalances
         }, accounts);
 
         const printWindow = window.open('', '_blank');
@@ -160,220 +169,260 @@ export const pdfExportService = {
      * Generar HTML para reporte financiero
      */
     generateFinancialReportHTML(reportData, metadata, accounts) {
-        const { startDate, endDate, groupBy, companyName, businessName, taxId, logo, totals } = metadata;
+        const { startDate, endDate, groupBy, companyName, businessName, taxId, logo, totals, monthlySummary, monthlyProfitLoss, bankBalances } = metadata;
         const groupByText = groupBy === 'year' ? 'Año' : (groupBy === 'month' ? 'Mes' : 'Trimestre');
 
+        // Determinar la moneda base y por defecto (esto debería venir de currencyService)
+        const baseCurrency = 'VES';
+        const defaultCurrency = 'USD';
+
         return `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Reporte Financiero - ${this.escapeHtml(companyName)}</title>
-            <meta charset="UTF-8">
-            <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-            <style>
-                ${this.getFinancialReportStyles()}
-                
-                /* ✅ Estilos para el header de 3 columnas que se repite */
-                @media print {
-                    thead { display: table-header-group; }
-                    .page-break { page-break-before: always; }
-                    .no-break { page-break-inside: avoid; }
-                    
-                    /* ✅ Estilo para que el header se repita en todas las páginas */
-                    .repeating-header {
-                        position: running(header);
-                    }
-                    
-                    @page {
-                        @top-center {
-                            content: element(header);
-                        }
-                    }
-                }
-                
-                /* ✅ Header con grid de 3 columnas */
-                .pdf-header {
-                    display: grid;
-                    grid-template-columns: 10% 60% 20%;
-                    gap: 15px;
-                    align-items: center;
-                    padding: 15px;
-                    background: white;
-                    border-bottom: 3px solid #007bff;
-                    margin-bottom: 20px;
-                }
-                
-                /* Para versión impresa */
-                @media print {
-                    .pdf-header {
-                        position: fixed;
-                        top: 0;
-                        left: 0;
-                        right: 0;
-                        background: white;
-                        z-index: 1000;
-                        border-bottom: 2px solid #007bff;
-                    }
-                    
-                    body {
-                        margin-top: 120px;
-                    }
-                    
-                    .report-container {
-                        margin-top: 0;
-                        padding-top: 0;
-                    }
-                }
-                
-                /* Para versión pantalla (vista previa) */
-                @media screen {
-                    .pdf-header {
-                        position: sticky;
-                        top: 0;
-                        z-index: 100;
-                        background: white;
-                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                    }
-                }
-                
-                /* Columna del logo */
-                .header-logo {
-                    text-align: center;
-                    padding: 5px;
-                }
-                
-                .header-logo img {
-                    max-width: 80px;
-                    max-height: 60px;
-                    object-fit: contain;
-                }
-                
-                .default-logo {
-                    width: 50px;
-                    height: 50px;
-                    background: #007bff;
-                    border-radius: 50%;
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: white;
-                    font-size: 24px;
-                    font-weight: bold;
-                }
-                
-                /* Columna de información de empresa */
-                .header-company {
-                    text-align: left;
-                }
-                
-                .header-company h1 {
-                    font-size: 18px;
-                    margin: 0 0 5px 0;
-                    color: #007bff;
-                }
-                
-                .header-company .company-name {
-                    font-size: 14px;
-                    font-weight: bold;
-                    margin: 0;
-                }
-                
-                .header-company .business-name {
-                    font-size: 11px;
-                    color: #6c757d;
-                    margin: 2px 0;
-                }
-                
-                .header-company .tax-id {
-                    font-size: 10px;
-                    color: #6c757d;
-                    margin: 2px 0;
-                }
-                
-                /* Columna de fechas */
-                .header-dates {
-                    text-align: right;
-                    font-size: 10px;
-                    color: #495057;
-                }
-                
-                .header-dates p {
-                    margin: 3px 0;
-                }
-                
-                .header-dates .report-title {
-                    font-weight: bold;
-                    font-size: 12px;
-                    color: #007bff;
-                }
-                
-                /* Ajuste del contenedor principal para el header fijo */
-                .report-container {
-                    padding-top: 0;
-                }
-                
-                /* Espaciado para el contenido debajo del header fijo */
-                .report-content {
-                    margin-top: 20px;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="report-container">
-                <!-- ✅ Header de 3 columnas que se repite -->
-                <div class="pdf-header" id="repeatingHeader">
-                    <!-- Columna 1: Logo (10%) -->
-                    <div class="header-logo">
-                        ${logo ?
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Reporte Financiero - ${this.escapeHtml(companyName)}</title>
+        <meta charset="UTF-8">
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+        <style>
+            ${this.getFinancialReportStyles()}
+            
+            /* Estilos adicionales para nuevas secciones */
+            .dual-currency {
+                font-size: 11px;
+                color: #6c757d;
+            }
+            .dual-currency .base {
+                color: #007bff;
+            }
+            .dual-currency .default {
+                color: #28a745;
+            }
+            .summary-table th, .summary-table td {
+                padding: 8px;
+                text-align: right;
+            }
+            .summary-table th:first-child, .summary-table td:first-child {
+                text-align: left;
+            }
+            .profit-positive {
+                color: #28a745;
+                font-weight: bold;
+            }
+            .profit-negative {
+                color: #dc3545;
+                font-weight: bold;
+            }
+            .bank-balances-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 10px;
+            }
+            .bank-balances-table th {
+                background: #007bff;
+                color: white;
+                padding: 8px;
+                text-align: left;
+            }
+            .bank-balances-table td {
+                padding: 6px;
+                border-bottom: 1px solid #dee2e6;
+            }
+            .bank-balances-table tr:hover {
+                background: #f8f9fa;
+            }
+            .section-title {
+                background: #343a40;
+                color: white;
+                padding: 10px 15px;
+                margin: 20px 0 15px 0;
+                border-radius: 6px;
+                font-size: 14px;
+            }
+            .profit-loss-card {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 15px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+            }
+            .profit-loss-card h4 {
+                margin: 0 0 10px 0;
+                font-size: 14px;
+            }
+            .profit-loss-card .total {
+                font-size: 24px;
+                font-weight: bold;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="report-container">
+            <button class="print-button no-print" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+            
+            <!-- Header de 3 columnas -->
+            <div class="pdf-header" id="repeatingHeader">
+                <div class="header-logo">
+                    ${logo ?
                 `<img src="${logo}" class="logo" alt="Logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
                              <div class="default-logo" style="display: none;">FC</div>` :
                 `<div class="default-logo">FC</div>`
             }
+                </div>
+                <div class="header-company">
+                    <h1>Reporte de Flujo de Caja</h1>
+                    <div class="company-name">${this.escapeHtml(companyName)}</div>
+                    ${businessName ? `<div class="business-name">${this.escapeHtml(businessName)}</div>` : ''}
+                    ${taxId ? `<div class="tax-id">RIF: ${this.escapeHtml(taxId)}</div>` : ''}
+                </div>
+                <div class="header-dates">
+                    <p class="report-title">Reporte Financiero</p>
+                    <p>Período: ${startDate} al ${endDate}</p>
+                    <p>Agrupado por: ${groupByText}</p>
+                    <p>Generado: ${new Date().toLocaleString('es-ES')}</p>
+                </div>
+            </div>
+            
+            <div class="report-content">
+                <!-- Tarjetas de resumen con doble moneda -->
+                <div class="summary-cards">
+                    <div class="card card-success">
+                        <div class="card-title">Total Ingresos</div>
+                        <div class="card-value">${this.formatCurrency(totals.totalIncome)}</div>
+                        <div class="dual-currency">
+                            <span class="base">💰 ${baseCurrency}: ${this.formatNumber(totals.totalIncome)}</span><br>
+                            <span class="default">💵 ${defaultCurrency}: ${this.formatNumber(totals.totalIncome / 36.50)}</span>
+                        </div>
                     </div>
-                    
-                    <!-- Columna 2: Información de la empresa (70%) -->
-                    <div class="header-company">
-                        <h1>Reporte Flujo de Caja</h1>
-                        <div class="company-name">${this.escapeHtml(companyName)}</div>
-                        ${businessName ? `<div class="business-name">${this.escapeHtml(businessName)}</div>` : ''}
-                        ${taxId ? `<div class="tax-id">RIF: ${this.escapeHtml(taxId)}</div>` : ''}
+                    <div class="card card-danger">
+                        <div class="card-title">Total Egresos</div>
+                        <div class="card-value">${this.formatCurrency(totals.totalExpense)}</div>
+                        <div class="dual-currency">
+                            <span class="base">💰 ${baseCurrency}: ${this.formatNumber(totals.totalExpense)}</span><br>
+                            <span class="default">💵 ${defaultCurrency}: ${this.formatNumber(totals.totalExpense / 36.50)}</span>
+                        </div>
                     </div>
-                    
-                    <!-- Columna 3: Fechas y metadatos (20%) -->
-                    <div class="header-dates">
-                        <p class="report-title">Reporte Financiero</p>
-                        <p>Período: ${startDate} al ${endDate}</p>
-                        <p>Agrupado por: ${groupByText}</p>
-                        <p>Generado: ${new Date().toLocaleString('es-ES')}</p>
+                    <div class="card ${totals.totalBalance >= 0 ? 'card-primary' : 'card-warning'}">
+                        <div class="card-title">Balance Neto</div>
+                        <div class="card-value">${this.formatCurrency(totals.totalBalance)}</div>
+                        <div class="dual-currency">
+                            <span class="base">💰 ${baseCurrency}: ${this.formatNumber(totals.totalBalance)}</span><br>
+                            <span class="default">💵 ${defaultCurrency}: ${this.formatNumber(totals.totalBalance / 36.50)}</span>
+                        </div>
                     </div>
                 </div>
                 
-                <!-- ✅ Contenido del reporte -->
-                <div class="report-content">
-                    <!-- Tarjetas de resumen -->
-                    <div class="summary-cards">
-                        <div class="card card-success">
-                            <div class="card-title">Total Ingresos</div>
-                            <div class="card-value">${this.formatCurrency(totals.totalIncome)}</div>
-                        </div>
-                        <div class="card card-danger">
-                            <div class="card-title">Total Egresos</div>
-                            <div class="card-value">${this.formatCurrency(totals.totalExpense)}</div>
-                        </div>
-                        <div class="card ${totals.totalBalance >= 0 ? 'card-primary' : 'card-warning'}">
-                            <div class="card-title">Balance Neto</div>
-                            <div class="card-value">${this.formatCurrency(totals.totalBalance)}</div>
-                        </div>
+                <!-- Gráfica de tendencia -->
+                <div class="chart-container">
+                    <h3>📈 Evolución de Ingresos vs Egresos</h3>
+                    <canvas id="trendChart" height="100"></canvas>
+                </div>
+                
+                <!-- Tabla Resumen por Período (Ingresos vs Egresos) -->
+                <div class="section-title">📊 Resumen de Ingresos y Egresos por Período</div>
+                <table class="summary-table" style="width: 100%; margin-bottom: 20px;">
+                    <thead>
+                        <tr>
+                            <th>Período</th>
+                            <th>Ingresos (${baseCurrency})</th>
+                            <th>Ingresos (${defaultCurrency})</th>
+                            <th>Egresos (${baseCurrency})</th>
+                            <th>Egresos (${defaultCurrency})</th>
+                            <th>Balance (${baseCurrency})</th>
+                            <th>Balance (${defaultCurrency})</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${monthlySummary.map(month => {
+                const ingresosUSD = month.totalIncome / 36.50;
+                const egresosUSD = month.totalExpense / 36.50;
+                const balance = month.totalIncome - month.totalExpense;
+                const balanceUSD = balance / 36.50;
+                return `
+                            <tr>
+                                <td><strong>${month.period}</strong></td>
+                                <td class="text-right">${this.formatNumber(month.totalIncome)}</td>
+                                <td class="text-right">${this.formatNumber(ingresosUSD)}</td>
+                                <td class="text-right">${this.formatNumber(month.totalExpense)}</td>
+                                <td class="text-right">${this.formatNumber(egresosUSD)}</td>
+                                <td class="text-right ${balance >= 0 ? 'profit-positive' : 'profit-negative'}">
+                                    ${this.formatNumber(balance)}
+                                </td>
+                                <td class="text-right ${balanceUSD >= 0 ? 'profit-positive' : 'profit-negative'}">
+                                    ${this.formatNumber(balanceUSD)}
+                                </td>
+                            </tr>
+                        `}).join('')}
+                    </tbody>
+                    <tfoot style="background: #f8f9fa; font-weight: bold;">
+                        <tr>
+                            <td><strong>TOTAL GENERAL</strong></td>
+                            <td class="text-right">${this.formatNumber(totals.totalIncome)}</td>
+                            <td class="text-right">${this.formatNumber(totals.totalIncome / 36.50)}</td>
+                            <td class="text-right">${this.formatNumber(totals.totalExpense)}</td>
+                            <td class="text-right">${this.formatNumber(totals.totalExpense / 36.50)}</td>
+                            <td class="text-right ${totals.totalBalance >= 0 ? 'profit-positive' : 'profit-negative'}">
+                                ${this.formatNumber(totals.totalBalance)}
+                            </td>
+                            <td class="text-right ${totals.totalBalance >= 0 ? 'profit-positive' : 'profit-negative'}">
+                                ${this.formatNumber(totals.totalBalance / 36.50)}
+                            </td>
+                        </tr>
+                    </tfoot>
+                </table>
+                
+                <!-- Gráfica de Ganancias/Pérdidas -->
+                <div class="chart-container">
+                    <h3>📊 Evolución de Ganancias / Pérdidas por Período</h3>
+                    <canvas id="profitLossChart" height="80"></canvas>
+                </div>
+                
+                <!-- Detalle por período (ingresos y egresos por categoría) -->
+                <div class="section-title">📋 Detalle de Transacciones por Período</div>
+                ${reportData.map(period => this.generatePeriodHTML(period, groupBy, accounts)).join('')}
+                
+                <!-- Saldos Bancarios -->
+                <div class="section-title">🏦 Saldos Bancarios Actuales</div>
+                <div class="bank-balances-container">
+                    ${bankBalances && bankBalances.length > 0 ? `
+                    <table class="bank-balances-table">
+                        <thead>
+                            <tr>
+                                <th>Banco</th>
+                                <th>Número de Cuenta</th>
+                                <th>Tipo</th>
+                                <th>Moneda</th>
+                                <th>Saldo Actual (${baseCurrency})</th>
+                                <th>Saldo Actual (${defaultCurrency})*</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${bankBalances.map(bank => {
+                    const saldoUSD = bank.current_balance / 36.50;
+                    return `
+                                <tr>
+                                    <td>${this.escapeHtml(bank.bank_name)}</td>
+                                    <td>${bank.account_number}</td>
+                                    <td>${this.getAccountTypeLabel(bank.account_type)}</td>
+                                    <td>${bank.currency_code || baseCurrency}</td>
+                                    <td class="text-right">${this.formatNumber(bank.current_balance)}</td>
+                                    <td class="text-right">${this.formatNumber(saldoUSD)}</td>
+                                </tr>
+                            `}).join('')}
+                        </tbody>
+                        <tfoot style="background: #e9ecef; font-weight: bold;">
+                            <tr>
+                                <td colspan="4"><strong>TOTAL SALDOS</strong></td>
+                                <td class="text-right">${this.formatNumber(bankBalances.reduce((sum, b) => sum + b.current_balance, 0))}</td>
+                                <td class="text-right">${this.formatNumber(bankBalances.reduce((sum, b) => sum + (b.current_balance / 36.50), 0))}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                    <div class="dual-currency" style="margin-top: 10px; font-size: 10px;">
+                        * Conversión realizada utilizando tasa de cambio referencial del día (${baseCurrency} 1 = ${defaultCurrency} ${(1 / 36.50).toFixed(4)})
                     </div>
-                    
-                    <!-- Gráfica de tendencia -->
-                    <div class="chart-container">
-                        <h3>📈 Evolución de Ingresos vs Egresos</h3>
-                        <canvas id="trendChart" height="100"></canvas>
-                    </div>
-                    
-                    <!-- Detalle por período -->
-                    ${reportData.map(period => this.generatePeriodHTML(period, groupBy, accounts)).join('')}
+                    ` : `
+                    <div class="alert alert-info">No hay cuentas bancarias configuradas o activas.</div>
+                    `}
                 </div>
                 
                 <div class="footer">
@@ -383,12 +432,10 @@ export const pdfExportService = {
             </div>
             
             <script>
-                // ✅ Script para manejar el header repetido en todas las páginas al imprimir
                 window.addEventListener('load', function() {
-                    // Clonar el header para que se repita en cada página impresa
+                    // Header fijo para impresión
                     const header = document.getElementById('repeatingHeader');
                     if (header) {
-                        // Para impresión, asegurar que el header se mantiene visible
                         const style = document.createElement('style');
                         style.textContent = \`
                             @media print {
@@ -403,15 +450,12 @@ export const pdfExportService = {
                                 body {
                                     margin-top: 120px;
                                 }
-                                .report-content {
-                                    margin-top: 0;
-                                }
                             }
                         \`;
                         document.head.appendChild(style);
                     }
                     
-                    // Renderizar gráfica
+                    // Gráfica de tendencia
                     const ctx = document.getElementById('trendChart').getContext('2d');
                     const groupBy = '${groupBy}';
                     const data = ${JSON.stringify(reportData)};
@@ -489,10 +533,60 @@ export const pdfExportService = {
                             }
                         }
                     });
+                    
+                    // Gráfica de Ganancias/Pérdidas
+                    const profitLossCtx = document.getElementById('profitLossChart').getContext('2d');
+                    const monthlyData = ${JSON.stringify(monthlyProfitLoss)};
+                    const profitLossLabels = monthlyData.map(m => m.period);
+                    const profitLossData = monthlyData.map(m => m.profitLoss);
+                    
+                    new Chart(profitLossCtx, {
+                        type: 'bar',
+                        data: {
+                            labels: profitLossLabels,
+                            datasets: [{
+                                label: 'Ganancia / Pérdida',
+                                data: profitLossData,
+                                backgroundColor: profitLossData.map(value => 
+                                    value >= 0 ? 'rgba(40, 167, 69, 0.7)' : 'rgba(220, 53, 69, 0.7)'
+                                ),
+                                borderColor: profitLossData.map(value => 
+                                    value >= 0 ? '#28a745' : '#dc3545'
+                                ),
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: true,
+                            plugins: {
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            const value = context.raw;
+                                            const prefix = value >= 0 ? '💰 Ganancia: ' : '⚠️ Pérdida: ';
+                                            return prefix + new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD' }).format(Math.abs(value));
+                                        }
+                                    }
+                                }
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: false,
+                                    ticks: {
+                                        callback: function(value) {
+                                            return new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD' }).format(value);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
                 });
             <\/script>
-        </body>
-        </html>
+        </div>
+    </body>
+    </html>
     `;
     },
 
@@ -1203,6 +1297,70 @@ export const pdfExportService = {
         `;
     },
 
+    // pdfExportService.js - Agregar este método
+
+    /**
+     * Calcular resumen mensual de ingresos y egresos
+     */
+    calculateMonthlySummary(reportData, groupBy) {
+        if (groupBy !== 'month') {
+            // Si no está agrupado por mes, reorganizar los datos
+            const monthlyData = new Map();
+
+            reportData.forEach(period => {
+                if (period.month && period.year) {
+                    const key = `${period.year}-${period.month}`;
+                    const monthName = period.monthName;
+
+                    if (!monthlyData.has(key)) {
+                        monthlyData.set(key, {
+                            period: monthName,
+                            year: period.year,
+                            month: period.month,
+                            totalIncome: 0,
+                            totalExpense: 0
+                        });
+                    }
+                    const month = monthlyData.get(key);
+                    month.totalIncome += period.totalIncome;
+                    month.totalExpense += period.totalExpense;
+                } else if (period.quarter) {
+                    // Si está agrupado por trimestre, distribuir proporcionalmente
+                    // Por simplicidad, mostrar como trimestre
+                    monthlyData.set(`${period.year}-Q${period.quarter}`, {
+                        period: period.quarterName,
+                        year: period.year,
+                        totalIncome: period.totalIncome,
+                        totalExpense: period.totalExpense
+                    });
+                } else if (period.year) {
+                    // Si está agrupado por año, mostrar como año
+                    monthlyData.set(`${period.year}`, {
+                        period: `Año ${period.year}`,
+                        year: period.year,
+                        totalIncome: period.totalIncome,
+                        totalExpense: period.totalExpense
+                    });
+                }
+            });
+
+            return Array.from(monthlyData.values()).sort((a, b) => {
+                if (a.year !== b.year) return a.year - b.year;
+                if (a.month && b.month) return a.month - b.month;
+                return 0;
+            });
+        }
+
+        // Ya está agrupado por mes
+        return reportData.map(month => ({
+            period: month.monthName,
+            year: month.year,
+            month: month.month,
+            totalIncome: month.totalIncome,
+            totalExpense: month.totalExpense
+        }));
+    },
+
     /**
      * Preparar datos para gráficos
      */
@@ -1568,5 +1726,20 @@ export const pdfExportService = {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
-    }
+    },
+
+    /**
+ * Obtener etiqueta del tipo de cuenta
+ */
+    getAccountTypeLabel(type) {
+        const labels = {
+            'corriente': 'Corriente',
+            'ahorros': 'Ahorros',
+            'nomina': 'Nómina',
+            'inversion': 'Inversión'
+        };
+        return labels[type] || type;
+    },
+
+
 };

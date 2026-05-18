@@ -247,6 +247,7 @@ class TransactionController
             'company_id' => $companyId,
             'user_id' => $userId,
             'account_id' => (int) $data['account_id'],
+            'bank_id' => $data['bank_id'] ?? null,  // ✅ Agregar bank_id
             'amount' => $amount,
             'currency_id' => $currencyId,
             'exchange_rate' => $exchangeRate,
@@ -257,9 +258,21 @@ class TransactionController
             'payment_method' => $data['payment_method']
         ];
 
+        error_log("=== CREATE INCOME - BANK DEBUG ===");
+        error_log("Datos recibidos: " . json_encode($data));
+        error_log("Bank ID recibido: " . ($data['bank_id'] ?? 'no enviado'));
+        error_log("Payment method: " . ($data['payment_method'] ?? 'no enviado'));
+
+        // Después de crear $incomeData
+        error_log("IncomeData a guardar: " . json_encode($incomeData));
+
         $income = $this->incomeModel->create($incomeData);
 
         if ($income) {
+            // ✅ Procesar actualización de saldo bancario
+            $bankBalanceService = new \App\Services\BankBalanceService();
+            $bankBalanceService->processIncomeBalance($income);
+
             Response::success($income, 'Ingreso registrado exitosamente', 201);
         } else {
             Response::error('Error al registrar el ingreso', 500);
@@ -293,12 +306,6 @@ class TransactionController
 
         Response::success($income);
     }
-
-    /**
-     * PUT /api/incomes/{id}
-     * Actualizar ingreso (con soporte para conversión de moneda)
-     */
-    // app/Controllers/TransactionController.php - updateIncome
 
     /**
      * PUT /api/incomes/{id}
@@ -440,9 +447,23 @@ class TransactionController
             }
         }
 
+        // ... obtener el income original antes de actualizar ...
+        $oldIncome = $this->incomeModel->find($id);
+
+        // Actualizar el ingreso
         $updated = $this->incomeModel->update($id, $updateData);
 
         if ($updated) {
+            // ✅ Revertir saldo anterior y aplicar nuevo
+            $bankBalanceService = new \App\Services\BankBalanceService();
+
+            // Revertir el saldo de la transacción anterior
+            $bankBalanceService->revertBalance('income', $oldIncome);
+
+            // Aplicar el saldo de la nueva transacción
+            $newIncome = $this->incomeModel->find($id);
+            $bankBalanceService->processIncomeBalance($newIncome);
+
             Response::success($updated, 'Ingreso actualizado exitosamente');
         } else {
             Response::error('Error al actualizar el ingreso', 500);
@@ -475,7 +496,14 @@ class TransactionController
         }
         // ========== FIN VALIDACIÓN ==========
 
+        // ✅ Guardar datos antes de eliminar para revertir saldo
+        $incomeData = $income;
+
         if ($this->incomeModel->delete($id)) {
+            // ✅ Revertir el saldo bancario
+            $bankBalanceService = new \App\Services\BankBalanceService();
+            $bankBalanceService->revertBalance('income', $incomeData);
+
             Response::success(null, 'Ingreso eliminado exitosamente');
         } else {
             Response::error('Error al eliminar el ingreso', 500);
@@ -708,6 +736,7 @@ class TransactionController
             'company_id' => $companyId,
             'user_id' => $userId,
             'account_id' => (int) $data['account_id'],
+            'bank_id' => $data['bank_id'] ?? null,  // ✅ Agregar bank_id
             'amount' => $amount,
             'currency_id' => $currencyId,
             'exchange_rate' => $exchangeRate,
@@ -715,7 +744,7 @@ class TransactionController
             'date' => $data['date'],
             'description' => $data['description'] ?? null,
             'reference' => $data['reference'] ?? null,
-            'payment_method' => $paymentMethod
+            'payment_method' => $data['payment_method']
         ];
 
         error_log("Datos de egreso a guardar: " . json_encode($expenseData));
@@ -723,6 +752,10 @@ class TransactionController
         $expense = $this->expenseModel->create($expenseData);
 
         if ($expense) {
+            // ✅ Procesar actualización de saldo bancario
+            $bankBalanceService = new \App\Services\BankBalanceService();
+            $bankBalanceService->processExpenseBalance($expense);
+
             Response::success($expense, 'Egreso registrado exitosamente', 201);
         } else {
             Response::error('Error al registrar el egreso', 500);
@@ -897,12 +930,26 @@ class TransactionController
             }
         }
 
+        // ... obtener el expense original antes de actualizar ...
+        $oldExpense = $this->expenseModel->find($id);
+
+        // Actualizar
         $updated = $this->expenseModel->update($id, $updateData);
 
         if ($updated) {
+            // ✅ Revertir saldo anterior y aplicar nuevo
+            $bankBalanceService = new \App\Services\BankBalanceService();
+
+            // Revertir el saldo de la transacción anterior
+            $bankBalanceService->revertBalance('expense', $oldExpense);
+
+            // Aplicar el saldo de la nueva transacción
+            $newIncome = $this->incomeModel->find($id);
+            $bankBalanceService->processIncomeBalance($newIncome);
+
             Response::success($updated, 'Egreso actualizado exitosamente');
         } else {
-            Response::error('Error al actualizar el egreso', 500);
+            Response::error('Error al actualizar el Egreso', 500);
         }
     }
     /**
@@ -932,10 +979,17 @@ class TransactionController
         }
         // ========== FIN VALIDACIÓN ==========
 
+        // ✅ Guardar datos antes de eliminar para revertir saldo
+        $expenseData = $expense;
+
         if ($this->expenseModel->delete($id)) {
+            // ✅ Revertir el saldo bancario
+            $bankBalanceService = new \App\Services\BankBalanceService();
+            $bankBalanceService->revertBalance('expense', $expenseData);
+
             Response::success(null, 'Egreso eliminado exitosamente');
         } else {
-            Response::error('Error al eliminar el egreso', 500);
+            Response::error('Error al eliminar el Egreso', 500);
         }
     }
 

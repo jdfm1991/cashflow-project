@@ -396,7 +396,7 @@ class MigrationController
         $validator->required('connection_id');
         $validator->required('year');
         $validator->required('month');
-        $validator->required('bank_id');
+        $validator->required('bank_id');  // Este es el ID del banco en la BD externa
 
         if (!$validator->passes()) {
             error_log("Validación fallida: " . json_encode($validator->errors()));
@@ -436,11 +436,45 @@ class MigrationController
             return;
         }
 
-        // Obtener el bank_id
-        $bankId = (int) $data['bank_id'];
-        error_log("Bank ID: " . $bankId);
+        // Obtener el bank_id externo
+        $externalBankId = (int) $data['bank_id'];
+        error_log("Bank ID externo: " . $externalBankId);
 
-        $transactions = $extService->getTransactions($data['year'], $data['month'], $bankId);
+        // ✅ Obtener el nombre del banco desde la BD externa
+        $bankName = $extService->getBankName($externalBankId);
+        error_log("Nombre del banco externo: " . $bankName);
+
+        // ✅ Buscar el banco en la BD interna por nombre
+        $bankModel = new \App\Models\Bank();
+        $internalBank = null;
+
+        if ($bankName) {
+            // Buscar por nombre exacto
+            $internalBank = $bankModel->findByName($bankName);
+
+            // Si no se encuentra por nombre exacto, buscar por coincidencia parcial
+            if (!$internalBank) {
+                $banks = $bankModel->getActiveBanks();
+                foreach ($banks as $bank) {
+                    if (stripos($bank['name'], $bankName) !== false || stripos($bankName, $bank['name']) !== false) {
+                        $internalBank = $bank;
+                        error_log("Banco encontrado por coincidencia parcial: {$bank['name']} (ID: {$bank['id']})");
+                        break;
+                    }
+                }
+            } else {
+                error_log("Banco encontrado por nombre exacto: {$internalBank['name']} (ID: {$internalBank['id']})");
+            }
+        }
+
+        // Si no se encuentra el banco, usar 0 o null para que el usuario lo seleccione manualmente
+        $internalBankId = $internalBank ? $internalBank['id'] : 0;
+
+        if ($internalBankId === 0) {
+            error_log("⚠️ No se encontró un banco interno con el nombre: {$bankName}");
+        }
+
+        $transactions = $extService->getTransactions($data['year'], $data['month'], $externalBankId);
         $extService->disconnect();
 
         if (empty($transactions)) {
@@ -474,7 +508,8 @@ class MigrationController
         foreach ($preview as $transaction) {
             $this->importedModel->create([
                 'company_id' => $companyId,
-                'bank_id' => 999,
+                'bank_id' => $internalBankId,  // ✅ Usar el ID real del banco interno
+                'bank_name' => $bankName,      // Guardar también el nombre para referencia
                 'transaction_date' => $transaction['date'],
                 'reference' => $transaction['reference'],
                 'description' => $transaction['description'],
@@ -491,6 +526,13 @@ class MigrationController
             'connection_info' => [
                 'id' => $connection['id'],
                 'name' => $connection['name']
+            ],
+            'bank_info' => [
+                'external_id' => $externalBankId,
+                'external_name' => $bankName,
+                'internal_id' => $internalBankId,
+                'internal_name' => $internalBank ? $internalBank['name'] : null,
+                'found' => $internalBankId > 0
             ],
             'income_accounts' => $incomeAccounts,
             'expense_accounts' => $expenseAccounts
@@ -634,15 +676,15 @@ class MigrationController
             $transactionId = (int) $transaction['id'];
             $type = $transaction['transaction_type'];
             $amount = (float) $transaction['amount'];
+            $bankId = (int) $transaction['bank_id'];  // ✅ Usar el bank_id ya guardado
 
-            // ✅ Buscar cuenta en el mapa de mappings
+            // Buscar cuenta en el mapa de mappings
             if (isset($mappingsMap[$transactionId])) {
                 $accountId = $mappingsMap[$transactionId];
-                error_log("Transacción {$transactionId} (índice {$index}): Usando cuenta mapeada ID {$accountId}");
+                error_log("Transacción {$transactionId}: Usando cuenta mapeada ID {$accountId}");
             } else {
-                // Usar cuenta por defecto según el tipo
                 $accountId = ($type === 'income') ? $defaultIncomeAccountId : $defaultExpenseAccountId;
-                error_log("Transacción {$transactionId} (índice {$index}): Usando cuenta por defecto ID {$accountId} (tipo: {$type})");
+                error_log("Transacción {$transactionId}: Usando cuenta por defecto ID {$accountId}");
             }
 
             // Verificar duplicado
@@ -657,6 +699,7 @@ class MigrationController
                 'company_id' => $companyId,
                 'user_id' => $userId,
                 'account_id' => $accountId,
+                'bank_id' => $bankId > 0 ? $bankId : null,
                 'amount' => $amount,
                 'currency_id' => $baseCurrencyId,
                 'exchange_rate' => 1.0,
@@ -671,19 +714,32 @@ class MigrationController
                 if ($type === 'income') {
                     $incomeModel = new \App\Models\Income();
                     $result = $incomeModel->create($transactionData);
+
+                    if ($result) {
+                        // ✅ Actualizar saldo bancario
+                        $bankBalanceService = new \App\Services\BankBalanceService();
+                        $bankBalanceService->processIncomeBalance($result);
+                        $imported++;
+                        error_log("Transacción {$transactionId}: ✅ Importada exitosamente (ingreso)");
+                    }
                 } else {
                     $expenseModel = new \App\Models\Expense();
                     $result = $expenseModel->create($transactionData);
+
+                    if ($result) {
+                        // ✅ Actualizar saldo bancario
+                        $bankBalanceService = new \App\Services\BankBalanceService();
+                        $bankBalanceService->processExpenseBalance($result);
+                        $imported++;
+                        error_log("Transacción {$transactionId}: ✅ Importada exitosamente (egreso)");
+                    }
                 }
 
                 if ($result) {
                     $this->importedModel->markAsProcessed($transactionId, $accountId);
-                    $imported++;
-                    error_log("Transacción {$transactionId}: ✅ Importada exitosamente");
                 } else {
                     $failed++;
                     $errors[] = "Transacción ID {$transactionId}: Error al guardar";
-                    error_log("Transacción {$transactionId}: ❌ Error al guardar");
                 }
             } catch (\Exception $e) {
                 $failed++;

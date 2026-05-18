@@ -1,6 +1,4 @@
 <?php
-// app/Services/ExternalDatabaseService.php
-
 namespace App\Services;
 
 use PDO;
@@ -345,8 +343,6 @@ class ExternalDatabaseService
         return openssl_decrypt($encrypted, 'aes-256-cbc', $key, 0, $iv);
     }
 
-    // app/Services/ExternalDatabaseService.php
-
     /**
      * Obtener el nombre de la tabla a consultar
      */
@@ -354,5 +350,32 @@ class ExternalDatabaseService
     {
         // Usar el table_name de la configuración, o el valor por defecto
         return $this->config['table_name'] ?? 'adm_bancos_operaciones';
+    }
+
+    /**
+     * Obtener el nombre del banco por su ID
+     */
+    public function getBankName(int $bankId): ?string
+    {
+        try {
+            $tableName = $this->getTableName();
+
+            $sql = "SELECT B.descripcion as name
+                FROM {$tableName} AS A 
+                INNER JOIN adm_tabla_bancos AS B ON A.cod_banco = B.cod_banco
+                WHERE A.cod_banco = :bank_id
+                LIMIT 1";
+
+            $results = $this->query($sql, ['bank_id' => $bankId]);
+
+            if (!empty($results)) {
+                return $results[0]['name'];
+            }
+
+            return null;
+        } catch (Exception $e) {
+            error_log("ExternalDatabaseService: Error getBankName - " . $e->getMessage());
+            return null;
+        }
     }
 }

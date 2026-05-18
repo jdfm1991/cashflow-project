@@ -523,7 +523,7 @@ export const reportsModule = {
         // Si es super_admin y hay una empresa seleccionada, del logo de la empresa
         if (isSuperAdmin && companyId && companyId !== '') {
             try {
-                const logoResponse = await companyService.getLogo(parseInt(companyId));                
+                const logoResponse = await companyService.getLogo(parseInt(companyId));
                 if (logoResponse.url) {
                     companyLogoPdf = logoResponse.url;
                     console.log('Logo de  la Empresa cargada para PDF:', companyLogoPdf);
@@ -540,13 +540,25 @@ export const reportsModule = {
             companyLogoPdf = null;
         }
 
+        // ✅ Obtener saldos bancarios
+        let bankBalances = [];
+        try {
+            const bankAccountsResponse = await api.get(`api/bank-accounts?company_id=${companyId || ''}`);
+            if (bankAccountsResponse.success && bankAccountsResponse.data) {
+                bankBalances = bankAccountsResponse.data;
+            }
+        } catch (error) {
+            console.error('Error loading bank balances:', error);
+        }
+
         // Delegar toda la lógica de PDF al servicio
         pdfExportService.exportFinancialReportToPDF(
             this.reportData,
             { startDate, endDate, groupBy },
             companyInfoForPdf,  // ✅ Pasar la información correcta de la empresa
             companyLogoPdf, // ✅ Pasar el logo de la empresa
-            reportService.accounts
+            reportService.accounts,
+            bankBalances  // ✅ Pasar los saldos bancarios
         );
 
         const companyText = companyInfoForPdf?.name ? `de ${companyInfoForPdf.name}` : 'general';
