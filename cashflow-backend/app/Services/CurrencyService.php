@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Services;
@@ -11,14 +12,14 @@ class CurrencyService
     private Currency $currencyModel;
     private ExchangeRate $exchangeRateModel;
     private ?array $baseCurrency = null;
-    
+
     public function __construct()
     {
         $this->currencyModel = new Currency();
         $this->exchangeRateModel = new ExchangeRate();
         $this->baseCurrency = $this->currencyModel->getBaseCurrency();
     }
-    
+
     /**
      * Obtener moneda base del sistema
      */
@@ -29,7 +30,7 @@ class CurrencyService
         }
         return $this->baseCurrency;
     }
-    
+
     /**
      * Obtener ID de la moneda base
      */
@@ -38,7 +39,7 @@ class CurrencyService
         $base = $this->getBaseCurrency();
         return $base['id'] ?? 1;
     }
-    
+
     /**
      * Obtener todas las monedas activas
      */
@@ -46,7 +47,7 @@ class CurrencyService
     {
         return $this->currencyModel->getActiveCurrencies();
     }
-    
+
     /**
      * Convertir monto a moneda base
      * 
@@ -58,7 +59,7 @@ class CurrencyService
     public function convertToBase(float $amount, int $fromCurrencyId, ?string $date = null): array
     {
         $baseCurrency = $this->getBaseCurrency();
-        
+
         if (!$baseCurrency) {
             return [
                 'success' => false,
@@ -68,10 +69,10 @@ class CurrencyService
                 'error' => 'No hay moneda base configurada'
             ];
         }
-        
+
         return $this->convert($amount, $fromCurrencyId, $baseCurrency['id'], $date);
     }
-    
+
     /**
      * Convertir monto entre dos monedas
      * 
@@ -94,10 +95,11 @@ class CurrencyService
                 'to_currency' => $toCurrencyId
             ];
         }
-        
+
+
         // Buscar tasa de cambio
         $rate = $this->exchangeRateModel->getRate($fromCurrencyId, $toCurrencyId, $date);
-        
+
         if (!$rate) {
             return [
                 'success' => false,
@@ -109,7 +111,7 @@ class CurrencyService
                 'to_currency' => $toCurrencyId
             ];
         }
-        
+
         return [
             'success' => true,
             'amount' => $amount,
@@ -119,7 +121,7 @@ class CurrencyService
             'to_currency' => $toCurrencyId
         ];
     }
-    
+
     /**
      * Obtener tasa de cambio entre dos monedas
      * 
@@ -132,7 +134,7 @@ class CurrencyService
     {
         return $this->exchangeRateModel->getRate($fromCurrencyId, $toCurrencyId, $date);
     }
-    
+
     /**
      * Formatear monto según moneda
      * 
@@ -143,21 +145,21 @@ class CurrencyService
     public function formatAmount(float $amount, int $currencyId): string
     {
         $currency = $this->currencyModel->find($currencyId);
-        
+
         if (!$currency) {
             return number_format($amount, 2, ',', '.');
         }
-        
+
         $formatted = number_format($amount, $currency['decimal_places'], ',', '.');
-        
+
         // Colocar símbolo según posición (antes o después)
         if (in_array($currency['code'], ['USD', 'EUR', 'GBP'])) {
             return $currency['symbol'] . ' ' . $formatted;
         }
-        
+
         return $formatted . ' ' . $currency['symbol'];
     }
-    
+
     /**
      * Validar que una moneda existe y está activa
      * 
@@ -168,5 +170,40 @@ class CurrencyService
     {
         $currency = $this->currencyModel->find($currencyId);
         return $currency && $currency['is_active'];
+    }
+
+
+
+
+
+
+
+    
+
+    /**
+     * Obtener moneda por defecto para visualización
+     */
+    public function getDefaultCurrency(): ?array
+    {
+        $default = $this->currencyModel->getDefaultCurrency();
+        if (!$default) {
+            return $this->getBaseCurrency();
+        }
+        return $default;
+    }
+
+    /**
+     * Convertir desde moneda base
+     */
+    public function convertFromBase(float $amount, int $toCurrencyId, ?string $date = null): array
+    {
+        $baseCurrency = $this->getBaseCurrency();
+        if (!$baseCurrency) {
+            return [
+                'success' => false,
+                'message' => 'No hay moneda base configurada'
+            ];
+        }
+        return $this->convert($amount, $baseCurrency['id'], $toCurrencyId, $date);
     }
 }

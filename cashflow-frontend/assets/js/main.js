@@ -16,6 +16,26 @@ import { bankAccountsModule } from '../../modules/bank-accounts.js';
 import { migrationModule } from '../../modules/migration.js';
 import { categoriesModule } from '../../modules/categories.js';
 
+// En main.js, después de las importaciones, agregar verificación
+console.log('=== VERIFICACIÓN DE MÓDULOS ===');
+console.log('incomeModule:', incomeModule);
+console.log('incomeModule.render:', typeof incomeModule?.render);
+console.log('expenseModule:', expenseModule);
+console.log('expenseModule.render:', typeof expenseModule?.render);
+
+// Si alguno no tiene render, asignarlo
+if (incomeModule && typeof incomeModule.render !== 'function') {
+    console.warn('incomeModule no tiene render, asignando...');
+    const tempModule = new (await import('./modules/income.js')).IncomeModule();
+    Object.assign(incomeModule, tempModule);
+}
+
+if (expenseModule && typeof expenseModule.render !== 'function') {
+    console.warn('expenseModule no tiene render, asignando...');
+    const tempModule = new (await import('./modules/expense.js')).ExpenseModule();
+    Object.assign(expenseModule, tempModule);
+}
+
 // Map of routes to modules
 const routes = {
     'login': loginModule,

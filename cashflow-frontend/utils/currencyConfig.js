@@ -56,6 +56,13 @@ export const currencyConfig = {
         symbol: 'Bs',
         decimalPlaces: 2,
         example: 'Bs 1.234,56'
+    },
+    EEUU: {
+        locale: 'en-US',
+        currency: 'USD',
+        symbol: '$',
+        decimalPlaces: 2,
+        example: '$ 1,234.56'
     }
 };
 

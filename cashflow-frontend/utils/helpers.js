@@ -41,6 +41,21 @@ export const formatCurrency = (amount) => {
 };
 
 /**
+ * Formato de moneda en dolares (2 decimales)
+ */
+export const formatCurrencyUSD = (amount) => {
+    const num = parseFloat(amount);
+    if (isNaN(num)) return '$ 0,00';
+    
+    return new Intl.NumberFormat(LOCALE, {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }).format(num);
+};
+
+/**
  * Formato de moneda sin símbolo (para cálculos)
  */
 export const formatNumber = (number, decimals = 2) => {

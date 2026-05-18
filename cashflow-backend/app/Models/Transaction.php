@@ -1,5 +1,5 @@
 <?php
-// app/Models/Transaction.php
+
 declare(strict_types=1);
 
 namespace App\Models;
@@ -524,8 +524,6 @@ abstract class Transaction extends BaseModel
         return $result['last_date'] ?? null;
     }
 
-    // app/Models/Transaction.php - Agregar estos métodos
-
     /**
      * Obtener todas las transacciones (global - sin filtro de empresa)
      * Para super_admin y admin
@@ -567,8 +565,6 @@ abstract class Transaction extends BaseModel
 
         return $stmt->fetchAll();
     }
-
-    // En app/Models/Transaction.php (ya deberían existir estos métodos)
 
     /**
      * Obtener transacciones globales con filtros (para super_admin)
@@ -701,4 +697,122 @@ abstract class Transaction extends BaseModel
         $result = $stmt->fetch();
         return (float) ($result['total'] ?? 0);
     }
+
+    /**
+     * Obtener estadísticas de ingresos para reconversión
+     */
+    public function getStats(?int $companyId, ?string $startDate, ?string $endDate): array
+    {
+        $sql = "SELECT 
+                COUNT(*) as count,
+                COALESCE(SUM(amount_base_currency), 0) as total,
+                COUNT(DISTINCT currency_id) as currencies_count
+            FROM {$this->table} 
+            WHERE 1=1";
+        $params = [];
+
+        if ($companyId && $companyId > 0) {
+            $sql .= " AND company_id = :company_id";
+            $params['company_id'] = $companyId;
+        }
+        if ($startDate) {
+            $sql .= " AND date >= :start_date";
+            $params['start_date'] = $startDate;
+        }
+        if ($endDate) {
+            $sql .= " AND date <= :end_date";
+            $params['end_date'] = $endDate;
+        }
+
+        $stmt = $this->db->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value);
+        }
+        $stmt->execute();
+        $result = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        return [
+            'count' => (int) ($result['count'] ?? 0),
+            'total' => (float) ($result['total'] ?? 0),
+            'currencies_count' => (int) ($result['currencies_count'] ?? 0)
+        ];
+    }
+
+    /**
+     * Obtener ingresos para reconversión
+     */
+    public function getForReconversion(?int $companyId, string $startDate, string $endDate): array
+    {
+        $sql = "SELECT id, date, amount_base_currency, currency_id, exchange_rate 
+            FROM {$this->table} 
+            WHERE date BETWEEN :start_date AND :end_date";
+        $params = [
+            'start_date' => $startDate,
+            'end_date' => $endDate
+        ];
+
+        if ($companyId && $companyId > 0) {
+            $sql .= " AND company_id = :company_id";
+            $params['company_id'] = $companyId;
+        }
+
+        $stmt = $this->db->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value);
+        }
+        $stmt->execute();
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Actualizar monto base de un ingreso
+     */
+    public function updateBaseAmount(int $id, float $newAmount, float $newRate): bool
+    {
+        $sql = "UPDATE {$this->table} 
+            SET amount_base_currency = :new_amount,
+                exchange_rate = :new_rate,
+                updated_at = NOW()
+            WHERE id = :id";
+
+        $stmt = $this->db->prepare($sql);
+        return $stmt->execute([
+            'new_amount' => $newAmount,
+            'new_rate' => $newRate,
+            'id' => $id
+        ]);
+    }
+
+    /**
+     * Reconverter un ingreso a una nueva moneda
+     * 
+     * @param int $id ID del ingreso
+     * @param int $newCurrencyId ID de la nueva moneda
+     * @param float $newAmount Nuevo monto en la nueva moneda
+     * @param float $newRate Nueva tasa de cambio
+     * @return bool
+     */
+    public function reconvertCurrency(int $id, int $newCurrencyId, float $newAmount, float $newRate): bool
+    {
+        try {
+            $sql = "UPDATE {$this->table} 
+                SET amount = :new_amount,
+                    currency_id = :new_currency_id,
+                    exchange_rate = :new_rate,
+                    updated_at = NOW()
+                WHERE id = :id";
+
+            $stmt = $this->db->prepare($sql);
+            return $stmt->execute([
+                ':new_amount' => $newAmount,
+                ':new_currency_id' => $newCurrencyId,
+                ':new_rate' => $newRate,
+                ':id' => $id
+            ]);
+        } catch (\PDOException $e) {
+            error_log("Error reconverting income {$id}: " . $e->getMessage());
+            return false;
+        }
+    }
+     
 }

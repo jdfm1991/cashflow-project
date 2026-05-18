@@ -274,4 +274,37 @@ class ExchangeRateController
 
         Response::success($rates);
     }
+
+    // app/Controllers/ExchangeRateController.php - Agregar este método
+
+    /**
+     * GET /api/exchange-rates/historical
+     * Obtener tasas históricas para un período
+     */
+    public function getHistoricalRates(): void
+    {
+        $fromCurrency = $_GET['from'] ?? null;
+        $toCurrency = $_GET['to'] ?? null;
+        $startDate = $_GET['start'] ?? null;
+        $endDate = $_GET['end'] ?? null;
+
+        if (!$fromCurrency || !$toCurrency) {
+            Response::validationError(['message' => 'Se requieren monedas origen y destino']);
+            return;
+        }
+
+        try {
+            $rates = $this->exchangeRateModel->getHistoricalRates(
+                (int) $fromCurrency,
+                (int) $toCurrency,
+                $startDate,
+                $endDate
+            );
+
+            Response::success($rates);
+        } catch (\Exception $e) {
+            error_log("Error in getHistoricalRates: " . $e->getMessage());
+            Response::error('Error al obtener tasas históricas: ' . $e->getMessage(), 500);
+        }
+    }
 }

@@ -116,6 +116,8 @@ class CurrencyController
         $validator->max('decimal_places', 4);
         $validator->optional('is_base');
         $validator->boolean('is_base');
+        $validator->optional('is_default');
+        $validator->boolean('is_default'); // ✅ Nuevo campo
 
         if (!$validator->passes()) {
             Response::validationError($validator->errors());
@@ -129,11 +131,8 @@ class CurrencyController
             return;
         }
 
-        // ✅ Convertir is_base a entero
-        //$isBase = isset($data['is_base']) ? (int) $data['is_base'] : 0;
-
-        // Si es moneda base, quitar base de otras
         $isBase = $data['is_base'] ?? false;
+        $isDefault = $data['is_default'] ?? false;
 
         $currencyData = [
             'code' => strtoupper($data['code']),
@@ -141,16 +140,19 @@ class CurrencyController
             'symbol' => $data['symbol'],
             'decimal_places' => $data['decimal_places'] ?? 2,
             'is_base' => $isBase,
+            'is_default' => $isDefault, // ✅ Nuevo campo
             'is_active' => true
         ];
 
         $currency = $this->currencyModel->create($currencyData);
 
-        if ($currency && $isBase) {
-            $this->currencyModel->setAsBaseCurrency($currency['id']);
-        }
-
         if ($currency) {
+            if ($isBase) {
+                $this->currencyModel->setAsBaseCurrency($currency['id']);
+            }
+            if ($isDefault) {
+                $this->currencyModel->setAsDefaultCurrency($currency['id']);
+            }
             Response::success($currency, 'Moneda creada exitosamente', 201);
         } else {
             Response::error('Error al crear la moneda', 500);
@@ -186,7 +188,7 @@ class CurrencyController
             return;
         }
 
-        $allowedFields = ['name', 'symbol', 'decimal_places', 'is_base', 'is_active'];
+        $allowedFields = ['name', 'symbol', 'decimal_places', 'is_base', 'is_default', 'is_active'];
         $updateData = array_intersect_key($data, array_flip($allowedFields));
 
         if (empty($updateData)) {
@@ -194,25 +196,30 @@ class CurrencyController
             return;
         }
 
-        // ✅ Asegurar que is_base es un entero (0 o 1)
+        // Asegurar tipos correctos
         if (isset($updateData['is_base'])) {
             $updateData['is_base'] = (int) $updateData['is_base'];
         }
-
-        // ✅ Asegurar que decimal_places es un entero
+        if (isset($updateData['is_default'])) {
+            $updateData['is_default'] = (int) $updateData['is_default'];
+        }
         if (isset($updateData['decimal_places'])) {
             $updateData['decimal_places'] = (int) $updateData['decimal_places'];
         }
-
-        // ✅ Asegurar que is_active es un entero
         if (isset($updateData['is_active'])) {
             $updateData['is_active'] = (int) $updateData['is_active'];
         }
 
         // Si se está estableciendo como base, actualizar otras
-        if (isset($updateData['is_base']) && $updateData['is_base'] === true) {
+        if (isset($updateData['is_base']) && $updateData['is_base'] === 1) {
             $this->currencyModel->setAsBaseCurrency($id);
-            $updateData['is_base'] = true;
+            $updateData['is_base'] = 1;
+        }
+
+        // ✅ Si se está estableciendo como default, actualizar otras
+        if (isset($updateData['is_default']) && $updateData['is_default'] === 1) {
+            $this->currencyModel->setAsDefaultCurrency($id);
+            $updateData['is_default'] = 1;
         }
 
         $updated = $this->currencyModel->update($id, $updateData);
@@ -285,6 +292,22 @@ class CurrencyController
         } else {
             Response::error('Error al eliminar la moneda', 500);
         }
+    }
+
+    /**
+     * GET /api/currencies/default
+     * Obtener moneda por defecto del sistema
+     */
+    public function getDefault(): void
+    {
+        $defaultCurrency = $this->currencyModel->getDefaultCurrency();
+
+        if (!$defaultCurrency) {
+            Response::notFound('No hay moneda por defecto configurada');
+            return;
+        }
+
+        Response::success($defaultCurrency);
     }
 
     /**

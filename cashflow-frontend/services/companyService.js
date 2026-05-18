@@ -53,6 +53,20 @@ export const companyService = {
     },
 
     /**
+     * Obtener el logo de la empresa por ID
+     * @param {number} id - ID de la empresa
+     */
+    async getLogo(id) {
+        try {
+            const response = await api.get(`api/companies/${id}/logo`);            
+            return response;
+        } catch (error) {
+            console.error(`Error en companyService.getById(${id}):`, error);
+            throw error;
+        }
+    },
+
+    /**
      * Crear nueva empresa (solo super_admin)
      * @param {Object} companyData - Datos de la empresa
      * @param {string} companyData.name - Nombre (requerido)

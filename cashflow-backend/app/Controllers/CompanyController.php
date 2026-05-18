@@ -388,9 +388,7 @@ class CompanyController
         readfile($logoPath);
         exit();
     }
-
-    // app/Controllers/CompanyController.php
-
+    
     /**
      * POST /api/companies/{id}/logo
      * Subir logo de empresa

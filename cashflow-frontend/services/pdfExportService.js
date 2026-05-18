@@ -10,13 +10,13 @@ export const pdfExportService = {
             primaryLight: isExpense ? '#f8d7da' : '#d4edda',
             secondary: '#6c757d',
             textColor: '#495057',
-            
+
             // Textos
             title: isExpense ? 'REPORTE DE EGRESOS' : 'REPORTE DE INGRESOS',
             icon: isExpense ? '📊' : '💰',
             badgeCash: isExpense ? 'Efectivo' : 'Efectivo',
             badgeBank: 'Banco',
-            
+
             // Estilos de badges
             badgeCashClass: isExpense ? 'badge-cash-expense' : 'badge-cash-income',
             badgeBankClass: 'badge-bank'
@@ -38,58 +38,740 @@ export const pdfExportService = {
             console.warn('No hay datos para exportar');
             return;
         }
-        
+
         const theme = this.getTheme(type);
-        
+
         let groupedData;
-        
+
         if (isSuperAdmin && showAllCompanies) {
             groupedData = this.groupByCompanyThenPeriod(transactions, groupBy);
         } else {
             groupedData = this.groupByPeriod(transactions, groupBy);
         }
-        
+
         const reportHtml = this.generateReportHTML(groupedData, filters, groupBy, isSuperAdmin, showAllCompanies, includeDetailedTables, type, theme);
-        
+
         const printWindow = window.open('', '_blank');
         if (!printWindow) {
             alert('Por favor, permite las ventanas emergentes para generar el PDF');
             return;
         }
-        
+
         printWindow.document.write(reportHtml);
         printWindow.document.close();
         printWindow.focus();
-        
+
         setTimeout(() => {
             printWindow.print();
         }, 1500);
     },
-    
+
     /**
      * Método específico para egresos (mantiene compatibilidad)
      */
     exportExpensesToPDF(expenses, filters, groupBy = 'month', isSuperAdmin = false, showAllCompanies = false, includeDetailedTables = true) {
         return this.exportToPDF(expenses, filters, groupBy, isSuperAdmin, showAllCompanies, includeDetailedTables, 'expense');
     },
-    
+
     /**
      * Método específico para ingresos (mantiene compatibilidad)
      */
     exportIncomesToPDF(incomes, filters, groupBy = 'month', isSuperAdmin = false, showAllCompanies = false, includeDetailedTables = true) {
         return this.exportToPDF(incomes, filters, groupBy, isSuperAdmin, showAllCompanies, includeDetailedTables, 'income');
     },
-    
+
+    // Agregar este método al pdfExportService.js
+
+    /**
+     * Exportar reporte financiero a PDF
+     * @param {Array} reportData - Datos del reporte (agrupados por período)
+     * @param {Object} filters - Filtros aplicados { startDate, endDate, groupBy }
+     * @param {Object} companyInfo - Información de la empresa { name, business_name, tax_id, logo }
+     * @param {Array} accounts - Lista de cuentas para obtener categorías
+     */
+    exportFinancialReportToPDF(reportData, filters, companyInfo = null, companyLogo = null, accounts = []) {
+        if (!reportData || reportData.length === 0) {
+            console.warn('No hay datos para exportar');
+            return;
+        }
+
+        const { startDate, endDate, groupBy } = filters;
+
+        // ✅ Depuración: Ver qué está llegando
+        console.log('=== PDF Export Debug ===');
+        console.log('companyInfo recibido:', companyInfo);
+        console.log('companyLogo recibido:', companyLogo);
+        console.log('companyInfo type:', typeof companyInfo);
+        console.log('companyInfo keys:', companyInfo ? Object.keys(companyInfo) : 'null');
+
+        // ✅ Extraer datos de empresa con valores por defecto
+        const companyName = companyInfo?.name || 'FlowControl';
+        const businessName = companyInfo?.business_name || '';
+        const taxId = companyInfo?.tax_id || '';
+        const logo = companyLogo || null;
+
+        console.log('Datos extraídos:', { companyName, businessName, taxId, logo });
+
+        const totals = this.calculateTotals(reportData);
+        const sortedData = [...reportData].sort((a, b) => {
+            if (groupBy === 'year') return a.year - b.year;
+            if (groupBy === 'month') return a.sortKey - b.sortKey;
+            if (groupBy === 'quarter') return a.sortKey - b.sortKey;
+            return 0;
+        });
+
+        const reportHtml = this.generateFinancialReportHTML(sortedData, {
+            startDate,
+            endDate,
+            groupBy,
+            companyName,
+            businessName,
+            taxId,
+            logo,
+            totals
+        }, accounts);
+
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) {
+            alert('Por favor, permite las ventanas emergentes para generar el PDF');
+            return;
+        }
+
+        printWindow.document.write(reportHtml);
+        printWindow.document.close();
+        printWindow.focus();
+
+        setTimeout(() => {
+            printWindow.print();
+        }, 1500);
+    },
+
+    /**
+     * Calcular totales para el reporte financiero
+     */
+    calculateTotals(reportData) {
+        const totalIncome = reportData.reduce((sum, p) => sum + p.totalIncome, 0);
+        const totalExpense = reportData.reduce((sum, p) => sum + p.totalExpense, 0);
+        const totalBalance = totalIncome - totalExpense;
+        return { totalIncome, totalExpense, totalBalance };
+    },
+
+    /**
+     * Generar HTML para reporte financiero
+     */
+    generateFinancialReportHTML(reportData, metadata, accounts) {
+        const { startDate, endDate, groupBy, companyName, businessName, taxId, logo, totals } = metadata;
+        const groupByText = groupBy === 'year' ? 'Año' : (groupBy === 'month' ? 'Mes' : 'Trimestre');
+
+        return `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Reporte Financiero - ${this.escapeHtml(companyName)}</title>
+            <meta charset="UTF-8">
+            <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+            <style>
+                ${this.getFinancialReportStyles()}
+                
+                /* ✅ Estilos para el header de 3 columnas que se repite */
+                @media print {
+                    thead { display: table-header-group; }
+                    .page-break { page-break-before: always; }
+                    .no-break { page-break-inside: avoid; }
+                    
+                    /* ✅ Estilo para que el header se repita en todas las páginas */
+                    .repeating-header {
+                        position: running(header);
+                    }
+                    
+                    @page {
+                        @top-center {
+                            content: element(header);
+                        }
+                    }
+                }
+                
+                /* ✅ Header con grid de 3 columnas */
+                .pdf-header {
+                    display: grid;
+                    grid-template-columns: 10% 60% 20%;
+                    gap: 15px;
+                    align-items: center;
+                    padding: 15px;
+                    background: white;
+                    border-bottom: 3px solid #007bff;
+                    margin-bottom: 20px;
+                }
+                
+                /* Para versión impresa */
+                @media print {
+                    .pdf-header {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        background: white;
+                        z-index: 1000;
+                        border-bottom: 2px solid #007bff;
+                    }
+                    
+                    body {
+                        margin-top: 120px;
+                    }
+                    
+                    .report-container {
+                        margin-top: 0;
+                        padding-top: 0;
+                    }
+                }
+                
+                /* Para versión pantalla (vista previa) */
+                @media screen {
+                    .pdf-header {
+                        position: sticky;
+                        top: 0;
+                        z-index: 100;
+                        background: white;
+                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                    }
+                }
+                
+                /* Columna del logo */
+                .header-logo {
+                    text-align: center;
+                    padding: 5px;
+                }
+                
+                .header-logo img {
+                    max-width: 80px;
+                    max-height: 60px;
+                    object-fit: contain;
+                }
+                
+                .default-logo {
+                    width: 50px;
+                    height: 50px;
+                    background: #007bff;
+                    border-radius: 50%;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    color: white;
+                    font-size: 24px;
+                    font-weight: bold;
+                }
+                
+                /* Columna de información de empresa */
+                .header-company {
+                    text-align: left;
+                }
+                
+                .header-company h1 {
+                    font-size: 18px;
+                    margin: 0 0 5px 0;
+                    color: #007bff;
+                }
+                
+                .header-company .company-name {
+                    font-size: 14px;
+                    font-weight: bold;
+                    margin: 0;
+                }
+                
+                .header-company .business-name {
+                    font-size: 11px;
+                    color: #6c757d;
+                    margin: 2px 0;
+                }
+                
+                .header-company .tax-id {
+                    font-size: 10px;
+                    color: #6c757d;
+                    margin: 2px 0;
+                }
+                
+                /* Columna de fechas */
+                .header-dates {
+                    text-align: right;
+                    font-size: 10px;
+                    color: #495057;
+                }
+                
+                .header-dates p {
+                    margin: 3px 0;
+                }
+                
+                .header-dates .report-title {
+                    font-weight: bold;
+                    font-size: 12px;
+                    color: #007bff;
+                }
+                
+                /* Ajuste del contenedor principal para el header fijo */
+                .report-container {
+                    padding-top: 0;
+                }
+                
+                /* Espaciado para el contenido debajo del header fijo */
+                .report-content {
+                    margin-top: 20px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="report-container">
+                <!-- ✅ Header de 3 columnas que se repite -->
+                <div class="pdf-header" id="repeatingHeader">
+                    <!-- Columna 1: Logo (10%) -->
+                    <div class="header-logo">
+                        ${logo ?
+                `<img src="${logo}" class="logo" alt="Logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+                             <div class="default-logo" style="display: none;">FC</div>` :
+                `<div class="default-logo">FC</div>`
+            }
+                    </div>
+                    
+                    <!-- Columna 2: Información de la empresa (70%) -->
+                    <div class="header-company">
+                        <h1>Reporte Flujo de Caja</h1>
+                        <div class="company-name">${this.escapeHtml(companyName)}</div>
+                        ${businessName ? `<div class="business-name">${this.escapeHtml(businessName)}</div>` : ''}
+                        ${taxId ? `<div class="tax-id">RIF: ${this.escapeHtml(taxId)}</div>` : ''}
+                    </div>
+                    
+                    <!-- Columna 3: Fechas y metadatos (20%) -->
+                    <div class="header-dates">
+                        <p class="report-title">Reporte Financiero</p>
+                        <p>Período: ${startDate} al ${endDate}</p>
+                        <p>Agrupado por: ${groupByText}</p>
+                        <p>Generado: ${new Date().toLocaleString('es-ES')}</p>
+                    </div>
+                </div>
+                
+                <!-- ✅ Contenido del reporte -->
+                <div class="report-content">
+                    <!-- Tarjetas de resumen -->
+                    <div class="summary-cards">
+                        <div class="card card-success">
+                            <div class="card-title">Total Ingresos</div>
+                            <div class="card-value">${this.formatCurrency(totals.totalIncome)}</div>
+                        </div>
+                        <div class="card card-danger">
+                            <div class="card-title">Total Egresos</div>
+                            <div class="card-value">${this.formatCurrency(totals.totalExpense)}</div>
+                        </div>
+                        <div class="card ${totals.totalBalance >= 0 ? 'card-primary' : 'card-warning'}">
+                            <div class="card-title">Balance Neto</div>
+                            <div class="card-value">${this.formatCurrency(totals.totalBalance)}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Gráfica de tendencia -->
+                    <div class="chart-container">
+                        <h3>📈 Evolución de Ingresos vs Egresos</h3>
+                        <canvas id="trendChart" height="100"></canvas>
+                    </div>
+                    
+                    <!-- Detalle por período -->
+                    ${reportData.map(period => this.generatePeriodHTML(period, groupBy, accounts)).join('')}
+                </div>
+                
+                <div class="footer">
+                    <p>Este reporte fue generado automáticamente por el Sistema de Flujo de Caja</p>
+                    <p>© ${new Date().getFullYear()} - Todos los derechos reservados</p>
+                </div>
+            </div>
+            
+            <script>
+                // ✅ Script para manejar el header repetido en todas las páginas al imprimir
+                window.addEventListener('load', function() {
+                    // Clonar el header para que se repita en cada página impresa
+                    const header = document.getElementById('repeatingHeader');
+                    if (header) {
+                        // Para impresión, asegurar que el header se mantiene visible
+                        const style = document.createElement('style');
+                        style.textContent = \`
+                            @media print {
+                                .pdf-header {
+                                    position: fixed;
+                                    top: 0;
+                                    left: 0;
+                                    right: 0;
+                                    background: white;
+                                    z-index: 1000;
+                                }
+                                body {
+                                    margin-top: 120px;
+                                }
+                                .report-content {
+                                    margin-top: 0;
+                                }
+                            }
+                        \`;
+                        document.head.appendChild(style);
+                    }
+                    
+                    // Renderizar gráfica
+                    const ctx = document.getElementById('trendChart').getContext('2d');
+                    const groupBy = '${groupBy}';
+                    const data = ${JSON.stringify(reportData)};
+                    
+                    let labels = [];
+                    let incomeData = [];
+                    let expenseData = [];
+                    
+                    if (groupBy === 'year') {
+                        labels = data.map(d => d.year);
+                        incomeData = data.map(d => d.totalIncome);
+                        expenseData = data.map(d => d.totalExpense);
+                    } else if (groupBy === 'month') {
+                        labels = data.map(d => d.monthName.substring(0, 3) + ' ' + d.year);
+                        incomeData = data.map(d => d.totalIncome);
+                        expenseData = data.map(d => d.totalExpense);
+                    } else {
+                        labels = data.map(d => d.quarterName + ' ' + d.year);
+                        incomeData = data.map(d => d.totalIncome);
+                        expenseData = data.map(d => d.totalExpense);
+                    }
+                    
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [
+                                {
+                                    label: 'Ingresos',
+                                    data: incomeData,
+                                    borderColor: '#28a745',
+                                    backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                                    fill: true,
+                                    tension: 0.4,
+                                    pointBackgroundColor: '#28a745',
+                                    pointBorderColor: '#fff',
+                                    pointRadius: 4,
+                                    pointHoverRadius: 6
+                                },
+                                {
+                                    label: 'Egresos',
+                                    data: expenseData,
+                                    borderColor: '#dc3545',
+                                    backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                                    fill: true,
+                                    tension: 0.4,
+                                    pointBackgroundColor: '#dc3545',
+                                    pointBorderColor: '#fff',
+                                    pointRadius: 4,
+                                    pointHoverRadius: 6
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: true,
+                            plugins: {
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            return context.dataset.label + ': ' + new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD' }).format(context.raw);
+                                        }
+                                    }
+                                }
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    ticks: {
+                                        callback: function(value) {
+                                            return new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD' }).format(value);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                });
+            <\/script>
+        </body>
+        </html>
+    `;
+    },
+
+    /**
+     * Generar HTML para un período específico
+     */
+    generatePeriodHTML(period, groupBy, accounts) {
+        const periodTitle = groupBy === 'year' ? `Año ${period.year}` :
+            (groupBy === 'month' ? `${period.monthName} ${period.year}` :
+                `${period.quarterName} ${period.year}`);
+
+        const balance = period.totalIncome - period.totalExpense;
+
+        // Función para agrupar por categoría
+        const getGroupedByCategory = (accountsByAccount) => {
+            const grouped = {};
+            for (const [accountName, amount] of Object.entries(accountsByAccount)) {
+                const accountInfo = accounts.find(a => a.name === accountName);
+                const category = accountInfo?.category || 'Otros';
+                if (!grouped[category]) {
+                    grouped[category] = { total: 0, accounts: [] };
+                }
+                grouped[category].total += amount;
+                grouped[category].accounts.push({ name: accountName, amount });
+            }
+            return grouped;
+        };
+
+        const incomeGrouped = getGroupedByCategory(period.incomeByAccount);
+        const expenseGrouped = getGroupedByCategory(period.expenseByAccount);
+
+        const renderCategorySection = (groupedData, total) => {
+            const sortedCategories = Object.keys(groupedData).sort((a, b) => groupedData[b].total - groupedData[a].total);
+
+            if (sortedCategories.length === 0) {
+                return '<div class="empty-message">No hay registros</div>';
+            }
+
+            let html = '';
+            for (const category of sortedCategories) {
+                const categoryData = groupedData[category];
+                const categoryPercent = total > 0 ? ((categoryData.total / total) * 100).toFixed(1) : 0;
+
+                html += `
+                <div class="category-group">
+                    <div class="category-header">
+                        <span><strong>${this.escapeHtml(category)}</strong> <span class="percent-badge">${categoryPercent}%</span></span>
+                        <span><strong>${this.formatCurrency(categoryData.total)}</strong></span>
+                    </div>
+                    <div class="category-accounts">
+                        ${categoryData.accounts
+                        .sort((a, b) => b.amount - a.amount)
+                        .map(acc => {
+                            const accPercent = total > 0 ? ((acc.amount / total) * 100).toFixed(1) : 0;
+                            return `
+                                    <div class="account-row">
+                                        <span>${this.escapeHtml(acc.name)}</span>
+                                        <span>${this.formatCurrency(acc.amount)} (${accPercent}%)</span>
+                                    </div>
+                                `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+            }
+            return html;
+        };
+
+        return `
+        <div class="period-section">
+            <div class="period-header">
+                <h2>📅 ${periodTitle}</h2>
+                <div class="period-summary">
+                    Ingresos: ${this.formatCurrency(period.totalIncome)} | 
+                    Egresos: ${this.formatCurrency(period.totalExpense)} | 
+                    Balance: ${this.formatCurrency(balance)}
+                </div>
+            </div>
+            <div class="period-content">
+                <div class="income-section">
+                    <h3 class="income-title">📈 INGRESOS</h3>
+                    ${renderCategorySection(incomeGrouped, period.totalIncome)}
+                    <div class="section-total">Total Ingresos: ${this.formatCurrency(period.totalIncome)}</div>
+                </div>
+                <div class="expense-section">
+                    <h3 class="expense-title">📉 EGRESOS</h3>
+                    ${renderCategorySection(expenseGrouped, period.totalExpense)}
+                    <div class="section-total">Total Egresos: ${this.formatCurrency(period.totalExpense)}</div>
+                </div>
+            </div>
+        </div>
+    `;
+    },
+
+    /**
+     * Estilos para el reporte financiero
+     */
+    getFinancialReportStyles() {
+        return `
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        @media print {
+            body { 
+                margin: 0; 
+                padding: 0; 
+                margin-top: 100px !important;
+            }
+            .no-print { display: none; }
+            .period-section, .chart-container { page-break-inside: avoid; }
+            
+            /* ✅ Asegurar que el header se repite en cada página */
+            .pdf-header {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                background: white;
+                z-index: 1000;
+                border-bottom: 2px solid #007bff;
+            }
+            
+            .report-content {
+                margin-top: 100px;
+            }
+        }
+        
+        @media screen {
+            body { background: #f0f2f5; padding: 20px; }
+            .report-container { 
+                max-width: 1200px; 
+                margin: 0 auto; 
+                background: white; 
+                box-shadow: 0 0 20px rgba(0,0,0,0.1); 
+                border-radius: 8px;
+            }
+            .print-button { 
+                position: fixed; 
+                bottom: 20px; 
+                right: 20px; 
+                background: #007bff; 
+                color: white; 
+                border: none; 
+                padding: 12px 24px; 
+                border-radius: 8px; 
+                cursor: pointer; 
+                font-size: 14px; 
+                font-weight: bold; 
+                z-index: 1000; 
+            }
+            .print-button:hover { background: #0056b3; }
+        }
+        
+        body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; line-height: 1.4; }
+        
+        /* ✅ Estilos del header fijo */
+        .pdf-header {
+            display: grid;
+            grid-template-columns: 10% 70% 20%;
+            gap: 15px;
+            align-items: center;
+            padding: 12px 20px;
+            background: white;
+            border-bottom: 3px solid #007bff;
+            margin-bottom: 20px;
+        }
+        
+        .header-logo {
+            text-align: center;
+            padding: 5px;
+        }
+        
+        .header-logo img {
+            max-width: 70px;
+            max-height: 55px;
+            object-fit: contain;
+        }
+        
+        .default-logo {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, #007bff, #0056b3);
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 22px;
+            font-weight: bold;
+            margin: 0 auto;
+        }
+        
+        .header-company {
+            text-align: left;
+        }
+        
+        .header-company h1 {
+            font-size: 18px;
+            margin: 0 0 5px 0;
+            color: #007bff;
+        }
+        
+        .header-company .company-name {
+            font-size: 13px;
+            font-weight: bold;
+            margin: 0;
+            color: #333;
+        }
+        
+        .header-company .business-name {
+            font-size: 10px;
+            color: #6c757d;
+            margin: 3px 0;
+        }
+        
+        .header-company .tax-id {
+            font-size: 10px;
+            color: #6c757d;
+            margin: 2px 0;
+        }
+        
+        .header-dates {
+            text-align: right;
+            font-size: 10px;
+            color: #495057;
+        }
+        
+        .header-dates p {
+            margin: 3px 0;
+        }
+        
+        .header-dates .report-title {
+            font-weight: bold;
+            font-size: 11px;
+            color: #007bff;
+            margin-bottom: 5px;
+        }
+        
+        /* Resto de los estilos existentes */
+        .summary-cards { display: flex; gap: 15px; margin-bottom: 30px; flex-wrap: wrap; }
+        .card { flex: 1; min-width: 150px; padding: 15px; border-radius: 8px; text-align: center; color: white; }
+        .card-success { background: #28a745; }
+        .card-danger { background: #dc3545; }
+        .card-primary { background: #007bff; }
+        .card-warning { background: #ffc107; color: #333; }
+        .card-title { font-size: 11px; opacity: 0.9; margin-bottom: 8px; text-transform: uppercase; }
+        .card-value { font-size: 20px; font-weight: bold; }
+        .chart-container { margin-bottom: 30px; padding: 15px; background: #f8f9fa; border-radius: 8px; }
+        .chart-container h3 { margin-bottom: 15px; color: #333; font-size: 14px; }
+        .period-section { margin-bottom: 30px; border: 1px solid #dee2e6; border-radius: 8px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+        .period-header { background: #343a40; color: white; padding: 12px 15px; }
+        .period-header h2 { margin: 0 0 5px; font-size: 16px; }
+        .period-summary { font-size: 11px; opacity: 0.8; }
+        .period-content { display: flex; flex-wrap: wrap; }
+        .income-section, .expense-section { flex: 1; min-width: 250px; padding: 15px; }
+        .income-section { border-right: 1px solid #dee2e6; }
+        .expense-section { border-left: 1px solid #dee2e6; }
+        .income-title { color: #28a745; font-size: 14px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 2px solid #28a745; }
+        .expense-title { color: #dc3545; font-size: 14px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 2px solid #dc3545; }
+        .category-group { margin-bottom: 12px; }
+        .category-header { background: #f8f9fa; padding: 6px 10px; border-radius: 4px; display: flex; justify-content: space-between; font-size: 11px; }
+        .percent-badge { background: #e9ecef; padding: 2px 6px; border-radius: 10px; font-size: 9px; margin-left: 5px; }
+        .category-accounts { padding-left: 15px; margin-top: 5px; }
+        .account-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 10px; border-bottom: 1px dashed #e9ecef; }
+        .section-total { margin-top: 15px; padding-top: 10px; text-align: right; font-weight: bold; font-size: 12px; border-top: 2px solid #dee2e6; }
+        .empty-message { text-align: center; color: #6c757d; padding: 20px; font-style: italic; }
+        .footer { text-align: center; margin-top: 30px; padding-top: 15px; border-top: 1px solid #dee2e6; font-size: 9px; color: #6c757d; }
+    `;
+    },
+
     /**
      * Agrupar primero por empresa, luego por período
      */
     groupByCompanyThenPeriod(transactions, groupBy) {
         const companiesMap = new Map();
-        
+
         transactions.forEach(transaction => {
             const companyId = transaction.company_id;
             const companyName = transaction.company_name || 'Sin empresa';
-            
+
             if (!companiesMap.has(companyId)) {
                 companiesMap.set(companyId, {
                     company_id: companyId,
@@ -98,17 +780,17 @@ export const pdfExportService = {
                     total_general: 0
                 });
             }
-            
+
             const company = companiesMap.get(companyId);
             company.items.push(transaction);
             company.total_general += parseFloat(transaction.amount_base_currency || transaction.amount);
         });
-        
+
         const result = [];
-        
+
         for (const company of companiesMap.values()) {
             const periodGroups = this.groupByPeriod(company.items, groupBy);
-            
+
             result.push({
                 type: 'company',
                 company_id: company.company_id,
@@ -118,24 +800,24 @@ export const pdfExportService = {
                 total_items: company.items.length
             });
         }
-        
+
         result.sort((a, b) => a.company_name.localeCompare(b.company_name));
-        
+
         return result;
     },
-    
+
     /**
      * Agrupar solo por período (sin empresa)
      */
     groupByPeriod(transactions, groupBy) {
         const groups = new Map();
         const sortedTransactions = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
-        
+
         sortedTransactions.forEach(transaction => {
             const date = new Date(transaction.date);
             let key, label;
-            
-            switch(groupBy) {
+
+            switch (groupBy) {
                 case 'week':
                     const weekNumber = this.getWeekNumber(date);
                     const year = date.getFullYear();
@@ -143,8 +825,8 @@ export const pdfExportService = {
                     label = `Semana ${weekNumber} (${year})`;
                     break;
                 case 'month':
-                    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
-                                       'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+                    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                        'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
                     key = `${date.getFullYear()}-${date.getMonth() + 1}`;
                     label = `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
                     break;
@@ -166,7 +848,7 @@ export const pdfExportService = {
                     key = `${date.getFullYear()}-${date.getMonth() + 1}`;
                     label = `${date.toLocaleString('es', { month: 'long', year: 'numeric' })}`;
             }
-            
+
             if (!groups.has(key)) {
                 groups.set(key, {
                     label: label,
@@ -175,24 +857,24 @@ export const pdfExportService = {
                     total: 0
                 });
             }
-            
+
             const group = groups.get(key);
             group.items.push(transaction);
             group.total += parseFloat(transaction.amount_base_currency || transaction.amount);
         });
-        
+
         return Array.from(groups.values()).sort((a, b) => a.key.localeCompare(b.key));
     },
-    
+
     /**
      * Generar HTML del reporte
      */
     generateReportHTML(groupedData, filters, groupBy, isSuperAdmin, showAllCompanies, includeDetailedTables, type, theme) {
         const isGroupedByCompany = showAllCompanies && isSuperAdmin && groupedData.length > 0 && groupedData[0].type === 'company';
-        
+
         let totalGeneral = 0;
         let totalTransacciones = 0;
-        
+
         if (isGroupedByCompany) {
             totalGeneral = groupedData.reduce((sum, company) => sum + company.total_general, 0);
             totalTransacciones = groupedData.reduce((sum, company) => sum + company.total_items, 0);
@@ -200,9 +882,9 @@ export const pdfExportService = {
             totalGeneral = groupedData.reduce((sum, group) => sum + group.total, 0);
             totalTransacciones = groupedData.reduce((sum, group) => sum + group.items.length, 0);
         }
-        
+
         const chartData = this.prepareChartData(groupedData, isGroupedByCompany);
-        
+
         return `
             <!DOCTYPE html>
             <html>
@@ -260,7 +942,7 @@ export const pdfExportService = {
             </html>
         `;
     },
-    
+
     /**
      * Estilos CSS dinámicos según tema
      */
@@ -324,7 +1006,7 @@ export const pdfExportService = {
             .text-center { text-align: center; }
         `;
     },
-    
+
     /**
      * Generar HTML para agrupación por empresa
      */
@@ -384,7 +1066,7 @@ export const pdfExportService = {
             </div>
         `).join('');
     },
-    
+
     /**
      * Generar HTML para agrupación simple (solo período)
      */
@@ -435,7 +1117,7 @@ export const pdfExportService = {
             </div>
         `).join('');
     },
-    
+
     /**
      * Generar resumen para agrupación por empresa
      */
@@ -479,7 +1161,7 @@ export const pdfExportService = {
             </table>
         `;
     },
-    
+
     /**
      * Generar resumen para agrupación simple
      */
@@ -520,7 +1202,7 @@ export const pdfExportService = {
             </table>
         `;
     },
-    
+
     /**
      * Preparar datos para gráficos
      */
@@ -529,7 +1211,7 @@ export const pdfExportService = {
             const companies = groupedData.map(c => c.company_name);
             const totals = groupedData.map(c => c.total_general);
             const colors = this.generateColors(companies.length);
-            
+
             const top5 = groupedData.slice(0, 5);
             const pieLabels = top5.map(c => c.company_name);
             const pieData = top5.map(c => c.total_general);
@@ -538,7 +1220,7 @@ export const pdfExportService = {
                 pieLabels.push('Otras');
                 pieData.push(otherTotal);
             }
-            
+
             return {
                 type: 'company',
                 barLabels: companies,
@@ -552,7 +1234,7 @@ export const pdfExportService = {
             const labels = groupedData.map(g => g.label);
             const totals = groupedData.map(g => g.total);
             const transactions = groupedData.map(g => g.items.length);
-            
+
             return {
                 type: 'period',
                 labels: labels,
@@ -562,7 +1244,7 @@ export const pdfExportService = {
             };
         }
     },
-    
+
     /**
      * Generar HTML de los gráficos
      */
@@ -600,14 +1282,14 @@ export const pdfExportService = {
             `;
         }
     },
-    
+
     /**
      * Generar script de inicialización de gráficos
      */
     generateChartInitializationScript(chartData, isGroupedByCompany, theme) {
         const primaryColor = theme.primary;
         const secondaryColor = theme.primary === '#dc3545' ? '#17a2b8' : '#17a2b8';
-        
+
         if (isGroupedByCompany) {
             return `
                 const barCtx = document.getElementById('barChartCompanies').getContext('2d');
@@ -793,7 +1475,7 @@ export const pdfExportService = {
             `;
         }
     },
-    
+
     /**
      * Generar colores para gráficos
      */
@@ -808,7 +1490,7 @@ export const pdfExportService = {
         }
         return colors;
     },
-    
+
     /**
      * Obtener texto de los filtros
      */
@@ -820,7 +1502,7 @@ export const pdfExportService = {
         if (filters.account_name) parts.push(`Cuenta: ${filters.account_name}`);
         return parts.length > 0 ? parts.join(' | ') : 'Todos (sin filtros)';
     },
-    
+
     /**
      * Obtener texto de la agrupación
      */
@@ -834,7 +1516,7 @@ export const pdfExportService = {
         };
         return texts[groupBy] || 'Meses';
     },
-    
+
     getGroupByTextLower(groupBy) {
         const texts = {
             'week': 'semana',
@@ -845,7 +1527,7 @@ export const pdfExportService = {
         };
         return texts[groupBy] || 'período';
     },
-    
+
     getWeekNumber(date) {
         const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
         const dayNum = d.getUTCDay() || 7;
@@ -853,31 +1535,34 @@ export const pdfExportService = {
         const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
         return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
     },
-    
+
     getQuarterName(quarter) {
         const quarters = { 1: '1er Trimestre', 2: '2do Trimestre', 3: '3er Trimestre', 4: '4to Trimestre' };
         return quarters[quarter];
     },
-    
+
     formatCurrency(amount) {
         return new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
     },
-    
+
     formatNumber(amount) {
         return new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
     },
-    
+
     formatDate(dateString) {
         const date = new Date(dateString);
         return date.toLocaleDateString('es-ES', { year: 'numeric', month: '2-digit', day: '2-digit' });
     },
-    
+
     truncate(text, maxLength) {
         if (!text) return '-';
         if (text.length <= maxLength) return text;
         return text.substring(0, maxLength - 3) + '...';
     },
-    
+
+    /**
+    * Escapar HTML para prevenir XSS
+    */
     escapeHtml(text) {
         if (!text) return '';
         const div = document.createElement('div');

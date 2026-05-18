@@ -1,12 +1,14 @@
-// modules/currencies.js
 import { api } from '../services/apiService.js';
+import { currencyService } from '../services/currencyService.js';
 import { showAlert } from '../utils/helpers.js';
 
 export const currenciesModule = {
     currencies: [],
     dataTable: null,
+   
 
-    async render(container) {
+    async render(container) {   
+        await currencyService.getAll();     
         container.innerHTML = `
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h1 class="h3">Gestión de Monedas</h1>
@@ -15,12 +17,53 @@ export const currenciesModule = {
                 </button>
             </div>
             
+            <div class="alert alert-info mb-3">
+                <i class="bi bi-info-circle"></i>
+                <strong>Sistema Multimoneda</strong><br>
+                La moneda base (${currencyService.baseCurrency?.code || 'No definida'}) se utiliza para los reportes financieros y conversiones automáticas.
+                Todas las transacciones se registran en su moneda original y se convierten automáticamente a la moneda base.
+            </div>
+            
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <div class="card bg-primary text-white">
+                        <div class="card-body">
+                            <h6 class="card-title">Moneda Base del Sistema</h6>
+                            <h2 class="mb-0">
+                                ${currencyService.baseCurrency ?
+                `${currencyService.baseCurrency.symbol} ${currencyService.baseCurrency.code}` :
+                'No configurada'}
+                            </h2>
+                            <small>Para almacenamiento y reportes</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card bg-success text-white">
+                        <div class="card-body">
+                            <h6 class="card-title">Moneda por Defecto</h6>
+                            <h2 class="mb-0">
+                                ${currencyService.defaultCurrency ?
+                `${currencyService.defaultCurrency.symbol} ${currencyService.defaultCurrency.code}` :
+                'No configurada'}
+                            </h2>
+                            <small>Para conversión y visualización</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card bg-info text-white">
+                        <div class="card-body">
+                            <h6 class="card-title">Monedas Activas</h6>
+                            <h2 class="mb-0">${currencyService.currencies.filter(c => c.is_active).length}</h2>
+                            <small>Monedas disponibles para transacciones</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
             <div class="card shadow-sm">
                 <div class="card-body">
-                    <div class="alert alert-info mb-3">
-                        <i class="bi bi-info-circle"></i>
-                        La moneda base se utiliza para los reportes financieros y conversiones automáticas.
-                    </div>
                     <div class="table-responsive">
                         <table id="currenciesTable" class="table table-hover table-striped" style="width:100%">
                             <thead>
@@ -50,9 +93,12 @@ export const currenciesModule = {
 
     async loadCurrencies() {
         try {
-            const response = await api.get('api/currencies/all');
+            const response = await currencyService.getAllWithInactive();
             if (response.success && response.data) {
                 this.currencies = response.data;
+                // Actualizar servicio
+                currencyService.currencies = this.currencies.filter(c => c.is_active);
+                currencyService.baseCurrency = this.currencies.find(c => c.is_base === 1);
                 this.renderDataTable();
             }
         } catch (error) {
@@ -73,8 +119,10 @@ export const currenciesModule = {
             currency.symbol,
             currency.decimal_places,
             currency.is_base ?
-                '<span class="badge bg-success">Base</span>' :
-                '<button class="btn btn-sm btn-outline-primary set-base" data-id="' + currency.id + '">Establecer como base</button>',
+                '<span class="badge bg-success"><i class="bi bi-star-fill"></i> Base</span>' :
+                `<button class="btn btn-sm btn-outline-primary set-base" data-id="${currency.id}">
+                    <i class="bi bi-star"></i> Establecer como base
+                </button>`,
             `<span class="badge ${currency.is_active ? 'bg-success' : 'bg-danger'}">
                 ${currency.is_active ? 'Activo' : 'Inactivo'}
             </span>`,
@@ -83,7 +131,8 @@ export const currenciesModule = {
                     <button class="btn btn-outline-primary edit-currency" data-id="${currency.id}" title="Editar">
                         <i class="bi bi-pencil"></i>
                     </button>
-                    <button class="btn btn-outline-danger delete-currency" data-id="${currency.id}" title="Eliminar" ${currency.is_base ? 'disabled' : ''}>
+                    <button class="btn btn-outline-danger delete-currency" data-id="${currency.id}" 
+                            title="Eliminar" ${currency.is_base ? 'disabled' : ''}>
                         <i class="bi bi-trash"></i>
                     </button>
                 </div>
@@ -100,8 +149,6 @@ export const currenciesModule = {
             ],
             drawCallback: () => this.attachTableEvents()
         });
-
-        this.attachTableEvents();
     },
 
     attachTableEvents() {
@@ -119,7 +166,7 @@ export const currenciesModule = {
                 const currency = this.currencies.find(c => c.id === id);
                 if (!currency) return;
 
-                const confirmed = confirm(`¿Está seguro de eliminar la moneda "${currency.name}"?`);
+                const confirmed = confirm(`¿Está seguro de eliminar la moneda "${currency.name}"?\n\nEsta acción no se puede deshacer.`);
                 if (!confirmed) return;
 
                 try {
@@ -127,6 +174,8 @@ export const currenciesModule = {
                     if (response.success) {
                         showAlert('Moneda eliminada exitosamente', 'success');
                         await this.loadCurrencies();
+                        // Limpiar caché de tasas
+                        currencyService.clearCache();
                     }
                 } catch (error) {
                     showAlert(error.message || 'Error al eliminar la moneda', 'danger');
@@ -140,7 +189,13 @@ export const currenciesModule = {
                 const currency = this.currencies.find(c => c.id === id);
                 if (!currency) return;
 
-                const confirmed = confirm(`¿Establecer "${currency.name}" como moneda base?\n\nEsto cambiará la moneda base del sistema.`);
+                const confirmed = confirm(`¿Establecer "${currency.name}" como moneda base?\n\n` +
+                    `Esto cambiará la moneda base del sistema y afectará:\n` +
+                    `• Reportes financieros\n` +
+                    `• Conversiones automáticas\n` +
+                    `• Visualización de montos\n\n` +
+                    `¿Desea continuar?`);
+
                 if (!confirmed) return;
 
                 try {
@@ -148,6 +203,8 @@ export const currenciesModule = {
                     if (response.success) {
                         showAlert('Moneda base actualizada exitosamente', 'success');
                         await this.loadCurrencies();
+                        // Limpiar caché de tasas
+                        currencyService.clearCache();
                     }
                 } catch (error) {
                     showAlert(error.message || 'Error al establecer la moneda base', 'danger');
@@ -193,13 +250,34 @@ export const currenciesModule = {
                                     <label class="form-label">Decimales</label>
                                     <input type="number" class="form-control" id="decimalPlaces" 
                                            value="${currency ? currency.decimal_places : 2}" min="0" max="4">
+                                    <small class="text-muted">Número de decimales para esta moneda</small>
                                 </div>
                                 <div class="mb-3">
                                     <div class="form-check">
                                         <input class="form-check-input" type="checkbox" id="isBase" 
                                                ${currency && currency.is_base ? 'checked' : ''}>
                                         <label class="form-check-label">
-                                            Establecer como moneda base
+                                            <i class="bi bi-star"></i> Establecer como moneda base
+                                        </label>
+                                        <div class="text-muted small">La moneda base se usa para reportes y conversiones automáticas</div>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="isDefault" 
+                                            ${currency && currency.is_default ? 'checked' : ''}>
+                                        <label class="form-check-label">
+                                            <i class="bi bi-star-fill text-warning"></i> Establecer como moneda por defecto
+                                        </label>
+                                        <div class="text-muted small">La moneda por defecto se usa para conversiones automáticas de visualización</div>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="isActive" 
+                                               ${!currency || currency.is_active ? 'checked' : ''}>
+                                        <label class="form-check-label">
+                                            <i class="bi bi-check-circle"></i> Activa
                                         </label>
                                     </div>
                                 </div>
@@ -230,7 +308,9 @@ export const currenciesModule = {
                 name: document.getElementById('currencyName').value.trim(),
                 symbol: document.getElementById('currencySymbol').value.trim(),
                 decimal_places: parseInt(document.getElementById('decimalPlaces').value) || 2,
-                is_base: document.getElementById('isBase').checked ? 1 : 0  // ✅ Convertir a 1 o 0
+                is_base: document.getElementById('isBase').checked,
+                is_default: document.getElementById('isDefault').checked, // ✅ Nuevo
+                is_active: document.getElementById('isActive').checked
             };
 
             if (!data.code || !data.name || !data.symbol) {
@@ -258,6 +338,7 @@ export const currenciesModule = {
 
                 modal.hide();
                 await this.loadCurrencies();
+                currencyService.clearCache();
             } catch (error) {
                 showAlert(error.message || 'Error al guardar la moneda', 'danger');
             } finally {

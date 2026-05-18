@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Models\Income;
 use App\Models\Expense;
 use App\Models\Account;
+use App\Models\ExchangeRate;
 use App\Helpers\Response;
 use App\Helpers\Validator;
 
@@ -15,12 +16,14 @@ class TransactionController
     private Income $incomeModel;
     private Expense $expenseModel;
     private Account $accountModel;
+    private ExchangeRate $exchangeRateModel;
 
     public function __construct()
     {
         $this->incomeModel = new Income();
         $this->expenseModel = new Expense();
         $this->accountModel = new Account();
+        $this->exchangeRateModel = new ExchangeRate();
     }
 
     /**
@@ -131,6 +134,12 @@ class TransactionController
         $rawInput = file_get_contents('php://input');
         $data = json_decode($rawInput, true);
 
+        // ✅ LOG para depuración
+        error_log("=== CREATE INCOME ===");
+        error_log("Datos recibidos: " . json_encode($data));
+
+
+
         // ✅ CORREGIDO: Determinar company_id según el rol
         $companyId = null;
 
@@ -184,16 +193,21 @@ class TransactionController
             return;
         }
 
-        // ========== NUEVO: MANEJO DE MONEDA Y CONVERSIÓN ==========
+        // app/Controllers/TransactionController.php - En createIncome
+
+        // ========== MANEJO DE MONEDA Y CONVERSIÓN ==========
+        // ✅ PRIORIZAR valores enviados por el frontend
 
         $currencyService = new \App\Services\CurrencyService();
         $baseCurrency = $currencyService->getBaseCurrency();
 
-        // Obtener moneda seleccionada (por defecto la moneda base)
+        // Obtener moneda seleccionada (del frontend o por defecto)
         $currencyId = isset($data['currency_id']) ? (int) $data['currency_id'] : ($baseCurrency['id'] ?? 9);
         $amount = (float) $data['amount'];
-        $exchangeRate = 1;
-        $amountBaseCurrency = $amount;
+
+        // ✅ VERIFICAR si el frontend ya envió valores calculados
+        $exchangeRate = isset($data['exchange_rate']) ? (float) $data['exchange_rate'] : null;
+        $amountBaseCurrency = isset($data['amount_base_currency']) ? (float) $data['amount_base_currency'] : null;
 
         // Verificar que la moneda existe
         $currencyModel = new \App\Models\Currency();
@@ -203,19 +217,28 @@ class TransactionController
             return;
         }
 
-        // Si la moneda seleccionada NO es la moneda base, buscar tasa de cambio
-        if ($baseCurrency && $currencyId != $baseCurrency['id']) {
-            $conversion = $currencyService->convert($amount, $currencyId, $baseCurrency['id'], $data['date']);
+        // ✅ SOLO recalcular si el frontend NO envió los valores
+        if ($exchangeRate === null || $amountBaseCurrency === null) {
+            error_log("⚠️ Frontend no envió exchange_rate o amount_base_currency, recalculando...");
 
-            if ($conversion['success']) {
-                $exchangeRate = $conversion['rate'];
-                $amountBaseCurrency = $conversion['converted_amount'];
+            if ($baseCurrency && $currencyId != $baseCurrency['id']) {
+                $conversion = $currencyService->convert($amount, $currencyId, $baseCurrency['id'], $data['date']);
+
+                if ($conversion['success']) {
+                    $exchangeRate = $conversion['rate'];
+                    $amountBaseCurrency = $conversion['converted_amount'];
+                } else {
+                    Response::validationError([
+                        'currency_id' => "No se encontró tasa de cambio para {$currency['code']} a {$baseCurrency['code']} en la fecha {$data['date']}"
+                    ]);
+                    return;
+                }
             } else {
-                Response::validationError([
-                    'currency_id' => "No se encontró tasa de cambio para {$currency['code']} a {$baseCurrency['code']} en la fecha {$data['date']}"
-                ]);
-                return;
+                $exchangeRate = 1;
+                $amountBaseCurrency = $amount;
             }
+        } else {
+            error_log("✅ Usando valores enviados por el frontend: exchange_rate=$exchangeRate, amount_base_currency=$amountBaseCurrency");
         }
 
         // ========== FIN DE LA NUEVA LÓGICA ==========
@@ -275,6 +298,12 @@ class TransactionController
      * PUT /api/incomes/{id}
      * Actualizar ingreso (con soporte para conversión de moneda)
      */
+    // app/Controllers/TransactionController.php - updateIncome
+
+    /**
+     * PUT /api/incomes/{id}
+     * Actualizar ingreso (con soporte para conversión de moneda)
+     */
     public function updateIncome(int $id): void
     {
         $rawInput = file_get_contents('php://input');
@@ -296,15 +325,14 @@ class TransactionController
         }
 
         // ========== VALIDACIÓN DE PERMISOS ==========
-        // Super_admin puede editar cualquier ingreso
         if ($userRole !== 'super_admin') {
             if ($income['company_id'] != $companyId) {
                 Response::forbidden('No tienes permisos para editar este ingreso');
                 return;
             }
         }
-        // ========== FIN VALIDACIÓN ==========
 
+        // Validaciones básicas
         $validator = new Validator($data ?? []);
         $validator->optional('account_id');
         $validator->numeric('account_id');
@@ -337,7 +365,7 @@ class TransactionController
             return;
         }
 
-        // Si se cambia la cuenta, verificar que existe y es del tipo correcto
+        // Verificar cuenta si se cambia
         if (isset($data['account_id'])) {
             $account = $this->accountModel->find((int) $data['account_id']);
             if (!$account) {
@@ -361,22 +389,38 @@ class TransactionController
             }
         }
 
-        // Manejar monto, moneda y fecha con recalculo de conversión
-        $needConversion = false;
-        $newAmount = isset($data['amount']) ? (float) $data['amount'] : $income['amount'];
-        $newCurrencyId = isset($data['currency_id']) ? (int) $data['currency_id'] : $income['currency_id'];
-        $newDate = isset($data['date']) ? $data['date'] : $income['date'];
-
-        if (isset($data['amount']) || isset($data['currency_id']) || isset($data['date'])) {
-            $needConversion = true;
-            $updateData['amount'] = $newAmount;
-            $updateData['currency_id'] = $newCurrencyId;
-            $updateData['date'] = $newDate;
+        // Manejar fecha
+        if (isset($data['date'])) {
+            $updateData['date'] = $data['date'];
         }
 
-        if ($needConversion) {
+        // ========== MANEJO DE MONEDA Y CONVERSIÓN ==========
+        // ✅ PRIORIZAR valores enviados por el frontend
+
+        $newAmount = isset($data['amount']) ? (float) $data['amount'] : $income['amount'];
+        $newCurrencyId = isset($data['currency_id']) ? (int) $data['currency_id'] : $income['currency_id'];
+
+        // ✅ VERIFICAR si el frontend ya envió valores calculados
+        $newExchangeRate = isset($data['exchange_rate']) ? (float) $data['exchange_rate'] : null;
+        $newAmountBaseCurrency = isset($data['amount_base_currency']) ? (float) $data['amount_base_currency'] : null;
+
+        $updateData['amount'] = $newAmount;
+        $updateData['currency_id'] = $newCurrencyId;
+
+        // ✅ SOLO recalcular si el frontend NO envió los valores
+        if ($newExchangeRate !== null && $newAmountBaseCurrency !== null) {
+            // Usar valores del frontend
+            $updateData['exchange_rate'] = $newExchangeRate;
+            $updateData['amount_base_currency'] = $newAmountBaseCurrency;
+            error_log("✅ updateIncome: Usando valores del frontend - exchange_rate=$newExchangeRate, amount_base_currency=$newAmountBaseCurrency");
+        } else {
+            // Recalcular (compatibilidad con versiones anteriores)
+            error_log("⚠️ updateIncome: Frontend no envió valores, recalculando...");
+
             $currencyService = new \App\Services\CurrencyService();
             $baseCurrency = $currencyService->getBaseCurrency();
+
+            $newDate = isset($data['date']) ? $data['date'] : $income['date'];
 
             if ($baseCurrency && $newCurrencyId != $baseCurrency['id']) {
                 $conversion = $currencyService->convert($newAmount, $newCurrencyId, $baseCurrency['id'], $newDate);
@@ -509,44 +553,86 @@ class TransactionController
         $rawInput = file_get_contents('php://input');
         $data = json_decode($rawInput, true);
 
-        // Validaciones básicas
-        $validator = new Validator($data);
-        $validator->required('account_id');
-        $validator->numeric('account_id');
-        $validator->required('amount');
-        $validator->numeric('amount');
-        $validator->min('amount', 0.01);
-        $validator->required('date');
-        $validator->date('date', 'Y-m-d');
+        error_log("=== CREATE EXPENSE ===");
+        error_log("Datos recibidos: " . json_encode($data));
 
-        if (!$validator->passes()) {
-            Response::validationError($validator->errors());
-            return;
+        // ✅ VALIDACIONES PASO A PASO
+        $errors = [];
+
+        // 1. Validar account_id
+        if (!isset($data['account_id']) || !is_numeric($data['account_id'])) {
+            $errors['account_id'] = 'Cuenta es requerida';
+        } else {
+            $account = $this->accountModel->find((int)$data['account_id']);
+            if (!$account) {
+                $errors['account_id'] = 'Cuenta no existe';
+            } elseif ($account['type'] !== 'expense') {
+                $errors['account_id'] = 'La cuenta no es de tipo egreso';
+            }
+            error_log("Cuenta verificada: " . json_encode($account));
         }
 
-        // ✅ CORREGIDO: Determinar company_id según el rol
-        $companyId = null;
+        // 2. Validar amount
+        if (!isset($data['amount']) || !is_numeric($data['amount']) || $data['amount'] <= 0) {
+            $errors['amount'] = 'Monto inválido';
+        }
+        error_log("Amount: " . ($data['amount'] ?? 'no'));
 
+        // 3. Validar date
+        if (!isset($data['date'])) {
+            $errors['date'] = 'Fecha requerida';
+        } else {
+            $date = $data['date'];
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                $errors['date'] = 'Formato de fecha inválido';
+            } elseif ($date > date('Y-m-d')) {
+                $errors['date'] = 'No se puede registrar con fecha futura';
+            }
+        }
+        error_log("Date: " . ($data['date'] ?? 'no'));
+
+        // 4. Validar payment_method
+        if (!isset($data['payment_method']) || !in_array($data['payment_method'], ['cash', 'bank'])) {
+            $errors['payment_method'] = 'Método de pago inválido';
+        }
+        error_log("Payment method: " . ($data['payment_method'] ?? 'no'));
+
+        // 5. Validar currency_id (opcional)
+        if (isset($data['currency_id'])) {
+            $currencyModel = new \App\Models\Currency();
+            $currency = $currencyModel->find((int)$data['currency_id']);
+            if (!$currency) {
+                $errors['currency_id'] = 'Moneda no existe';
+            }
+            error_log("Currency: " . json_encode($currency));
+        }
+
+        // 6. Validar company_id (para super_admin)
+        $companyId = null;
         if ($userRole === 'super_admin') {
-            // Si es super_admin y se envió company_id en el request, usar ese
             if (isset($data['company_id']) && $data['company_id'] > 0) {
-                $companyId = (int) $data['company_id'];
-                error_log("Super admin creando egreso para empresa: {$companyId}");
+                $companyModel = new \App\Models\Company();
+                $company = $companyModel->find((int)$data['company_id']);
+                if (!$company) {
+                    $errors['company_id'] = 'Empresa no existe';
+                }
+                $companyId = (int)$data['company_id'];
+                error_log("Company: " . json_encode($company));
             } else {
-                // Si no se envió, usar la empresa del usuario
                 $companyId = $this->getCompanyId($userId);
-                error_log("Super admin sin company_id específico, usando su empresa: {$companyId}");
             }
         } else {
-            // Usuario normal: usar su empresa
             $companyId = $this->getCompanyId($userId);
-            error_log("Usuario normal creando egreso para su empresa: {$companyId}");
         }
 
-        if ($userId <= 0 || $companyId <= 0) {
-            Response::unauthorized('Usuario no autenticado o sin empresa asociada');
+        // Si hay errores, responder
+        if (!empty($errors)) {
+            error_log("❌ Errores de validación: " . json_encode($errors));
+            Response::validationError($errors);
             return;
         }
+
+        error_log("✅ Validaciones pasadas correctamente");
 
         // Validar fecha futura
         if (!$this->validateDateNotFuture($data['date'])) {
@@ -554,21 +640,28 @@ class TransactionController
             return;
         }
 
-        // Verificar cuenta
+        // Verificar cuenta nuevamente (por si acaso)
         $account = $this->accountModel->find((int) $data['account_id']);
         if (!$account || $account['type'] !== 'expense') {
             Response::validationError(['account_id' => 'Cuenta no válida para egreso']);
             return;
         }
 
-        // Manejo de moneda y conversión
+        // ========== MANEJO DE MONEDA Y CONVERSIÓN ==========
+        // ✅ PRIORIZAR valores enviados por el frontend
+
         $currencyService = new \App\Services\CurrencyService();
         $baseCurrency = $currencyService->getBaseCurrency();
+
+        // Obtener moneda seleccionada (del frontend o por defecto)
         $currencyId = isset($data['currency_id']) ? (int) $data['currency_id'] : ($baseCurrency['id'] ?? 9);
         $amount = (float) $data['amount'];
-        $exchangeRate = 1;
-        $amountBaseCurrency = $amount;
 
+        // ✅ VERIFICAR si el frontend ya envió valores calculados
+        $exchangeRate = isset($data['exchange_rate']) ? (float) $data['exchange_rate'] : null;
+        $amountBaseCurrency = isset($data['amount_base_currency']) ? (float) $data['amount_base_currency'] : null;
+
+        // Verificar que la moneda existe
         $currencyModel = new \App\Models\Currency();
         $currency = $currencyModel->find($currencyId);
         if (!$currency) {
@@ -576,16 +669,31 @@ class TransactionController
             return;
         }
 
-        if ($baseCurrency && $currencyId != $baseCurrency['id']) {
-            $conversion = $currencyService->convert($amount, $currencyId, $baseCurrency['id'], $data['date']);
-            if ($conversion['success']) {
-                $exchangeRate = $conversion['rate'];
-                $amountBaseCurrency = $conversion['converted_amount'];
+        // ✅ SOLO recalcular si el frontend NO envió los valores
+        if ($exchangeRate !== null && $amountBaseCurrency !== null) {
+            // Usar valores del frontend
+            error_log("✅ createExpense: Usando valores del frontend - exchange_rate=$exchangeRate, amount_base_currency=$amountBaseCurrency");
+        } else {
+            // Recalcular (compatibilidad con versiones anteriores)
+            error_log("⚠️ createExpense: Frontend no envió valores, recalculando...");
+
+            if ($baseCurrency && $currencyId != $baseCurrency['id']) {
+                $conversion = $currencyService->convert($amount, $currencyId, $baseCurrency['id'], $data['date']);
+
+                if ($conversion['success']) {
+                    $exchangeRate = $conversion['rate'];
+                    $amountBaseCurrency = $conversion['converted_amount'];
+                    error_log("createExpense: Conversión calculada - rate=$exchangeRate, base=$amountBaseCurrency");
+                } else {
+                    Response::validationError([
+                        'currency_id' => "No se encontró tasa de cambio para {$currency['code']} a {$baseCurrency['code']} en la fecha {$data['date']}"
+                    ]);
+                    return;
+                }
             } else {
-                Response::validationError([
-                    'currency_id' => "No se encontró tasa de cambio para {$currency['code']} a {$baseCurrency['code']} en la fecha {$data['date']}"
-                ]);
-                return;
+                $exchangeRate = 1;
+                $amountBaseCurrency = $amount;
+                error_log("createExpense: Misma moneda base - rate=1, base=$amountBaseCurrency");
             }
         }
 
@@ -597,7 +705,7 @@ class TransactionController
 
         // Crear egreso
         $expenseData = [
-            'company_id' => $companyId,  // ← Usar el company_id determinado
+            'company_id' => $companyId,
             'user_id' => $userId,
             'account_id' => (int) $data['account_id'],
             'amount' => $amount,
@@ -653,12 +761,14 @@ class TransactionController
      * - Para super_admin: puede editar cualquier egreso (con restricciones según tipo)
      * - Para otros roles: solo egresos de su empresa
      */
+    // app/Controllers/TransactionController.php - updateExpense
+
     public function updateExpense(int $id): void
     {
         $rawInput = file_get_contents('php://input');
         $data = json_decode($rawInput, true);
         $userId = $this->getUserId();
-        $userRole = $this->getUserRole($userId);  // ← Obtener rol
+        $userRole = $this->getUserRole($userId);
 
         if ($userId <= 0) {
             Response::unauthorized('Usuario no autenticado');
@@ -672,9 +782,7 @@ class TransactionController
             return;
         }
 
-        // ========== VALIDACIÓN DE PERMISOS ==========
-        // Super_admin puede editar cualquier egreso
-        // Otros roles solo pueden editar egresos de su empresa
+        // Validación de permisos
         if ($userRole !== 'super_admin') {
             $companyId = $this->getCompanyId($userId);
             if ($expense['company_id'] != $companyId) {
@@ -682,58 +790,10 @@ class TransactionController
                 return;
             }
         }
-        // ========== FIN VALIDACIÓN ==========
 
-        // ========== VALIDAR SEGÚN TIPO DE PAGO ==========
-        $isBankExpense = isset($expense['payment_method']) && $expense['payment_method'] === 'bank';
+        // ========== Egreso en efectivo ==========
 
-        if ($isBankExpense) {
-            // Egreso bancario: SOLO puede editar 'description'
-            $allowedFields = ['description'];
-            $updateData = [];
-
-            if (isset($data['description'])) {
-                $updateData['description'] = $data['description'];
-            }
-
-            // Validar que solo se esté intentando editar descripción
-            $forbiddenFields = array_diff(array_keys($data), $allowedFields);
-            if (!empty($forbiddenFields)) {
-                Response::forbidden(
-                    'Los egresos bancarios solo permiten editar la descripción. ' .
-                        'Campos no permitidos: ' . implode(', ', $forbiddenFields)
-                );
-                return;
-            }
-
-            if (empty($updateData)) {
-                Response::error('No hay campos válidos para actualizar', 400);
-                return;
-            }
-
-            // Validar descripción
-            $validator = new Validator($updateData);
-            $validator->optional('description');
-            $validator->string('description');
-            $validator->maxLength('description', 500);
-
-            if (!$validator->passes()) {
-                Response::validationError($validator->errors());
-                return;
-            }
-
-            $updated = $this->expenseModel->update($id, $updateData);
-
-            if ($updated) {
-                Response::success($updated, 'Descripción del egreso bancario actualizada exitosamente');
-            } else {
-                Response::error('Error al actualizar la descripción', 500);
-            }
-            return;
-        }
-
-        // ========== Egreso en efectivo: permite editar todos los campos ==========
-
+        // Validaciones básicas
         $validator = new Validator($data ?? []);
         $validator->optional('account_id');
         $validator->numeric('account_id');
@@ -766,7 +826,7 @@ class TransactionController
             return;
         }
 
-        // Si se cambia la cuenta, verificar que existe y es del tipo correcto
+        // Verificar cuenta si se cambia
         if (isset($data['account_id'])) {
             $account = $this->accountModel->find((int) $data['account_id']);
             if (!$account) {
@@ -790,22 +850,34 @@ class TransactionController
             }
         }
 
-        // Manejar monto, moneda y fecha con recalculo de conversión
-        $needConversion = false;
-        $newAmount = isset($data['amount']) ? (float) $data['amount'] : $expense['amount'];
-        $newCurrencyId = isset($data['currency_id']) ? (int) $data['currency_id'] : $expense['currency_id'];
-        $newDate = isset($data['date']) ? $data['date'] : $expense['date'];
-
-        if (isset($data['amount']) || isset($data['currency_id']) || isset($data['date'])) {
-            $needConversion = true;
-            $updateData['amount'] = $newAmount;
-            $updateData['currency_id'] = $newCurrencyId;
-            $updateData['date'] = $newDate;
+        // Manejar fecha
+        if (isset($data['date'])) {
+            $updateData['date'] = $data['date'];
         }
 
-        if ($needConversion) {
+        // ========== MANEJO DE MONEDA Y CONVERSIÓN ==========
+        $newAmount = isset($data['amount']) ? (float) $data['amount'] : $expense['amount'];
+        $newCurrencyId = isset($data['currency_id']) ? (int) $data['currency_id'] : $expense['currency_id'];
+
+        // ✅ VERIFICAR si el frontend ya envió valores calculados
+        $newExchangeRate = isset($data['exchange_rate']) ? (float) $data['exchange_rate'] : null;
+        $newAmountBaseCurrency = isset($data['amount_base_currency']) ? (float) $data['amount_base_currency'] : null;
+
+        $updateData['amount'] = $newAmount;
+        $updateData['currency_id'] = $newCurrencyId;
+
+        // ✅ SOLO recalcular si el frontend NO envió los valores
+        if ($newExchangeRate !== null && $newAmountBaseCurrency !== null) {
+            $updateData['exchange_rate'] = $newExchangeRate;
+            $updateData['amount_base_currency'] = $newAmountBaseCurrency;
+            error_log("✅ updateExpense: Usando valores del frontend - exchange_rate=$newExchangeRate, amount_base_currency=$newAmountBaseCurrency");
+        } else {
+            error_log("⚠️ updateExpense: Frontend no envió valores, recalculando...");
+
             $currencyService = new \App\Services\CurrencyService();
             $baseCurrency = $currencyService->getBaseCurrency();
+
+            $newDate = isset($data['date']) ? $data['date'] : $expense['date'];
 
             if ($baseCurrency && $newCurrencyId != $baseCurrency['id']) {
                 $conversion = $currencyService->convert($newAmount, $newCurrencyId, $baseCurrency['id'], $newDate);
@@ -941,5 +1013,299 @@ class TransactionController
         }
 
         return $errors;
+    }
+
+    // app/Controllers/TransactionController.php - Agregar estos métodos
+
+    /**
+     * GET /api/incomes/stats
+     * Obtener estadísticas de ingresos para reconversión
+     */
+    public function getIncomeStats(): void
+    {
+        $userId = $this->getUserId();
+        $userRole = $this->getUserRole($userId);
+
+        if ($userId <= 0) {
+            Response::unauthorized('Usuario no autenticado');
+            return;
+        }
+
+        $companyId = null;
+        if ($userRole !== 'super_admin') {
+            $companyId = $this->getCompanyId($userId);
+        } else {
+            $companyId = isset($_GET['company_id']) && $_GET['company_id'] !== '' ? (int) $_GET['company_id'] : null;
+        }
+
+        $startDate = $_GET['start_date'] ?? null;
+        $endDate = $_GET['end_date'] ?? null;
+
+        $stats = $this->incomeModel->getStats($companyId, $startDate, $endDate);
+
+        Response::success($stats);
+    }
+
+    /**
+     * GET /api/expenses/stats
+     * Obtener estadísticas de egresos para reconversión
+     */
+    public function getExpenseStats(): void
+    {
+        $userId = $this->getUserId();
+        $userRole = $this->getUserRole($userId);
+
+        if ($userId <= 0) {
+            Response::unauthorized('Usuario no autenticado');
+            return;
+        }
+
+        $companyId = null;
+        if ($userRole !== 'super_admin') {
+            $companyId = $this->getCompanyId($userId);
+        } else {
+            $companyId = isset($_GET['company_id']) && $_GET['company_id'] !== '' ? (int) $_GET['company_id'] : null;
+        }
+
+        $startDate = $_GET['start_date'] ?? null;
+        $endDate = $_GET['end_date'] ?? null;
+
+        $stats = $this->expenseModel->getStats($companyId, $startDate, $endDate);
+
+        Response::success($stats);
+    }
+
+    /**
+     * POST /api/incomes/reconvert
+     * Ejecutar reconversión masiva de ingresos
+     */
+    public function reconvertIncomes(): void
+    {
+        $userId = $this->getUserId();
+        $userRole = $this->getUserRole($userId);
+
+        if ($userId <= 0) {
+            Response::unauthorized('Usuario no autenticado');
+            return;
+        }
+
+        $rawInput = file_get_contents('php://input');
+        $data = json_decode($rawInput, true);
+
+        $startDate = $data['start_date'] ?? null;
+        $endDate = $data['end_date'] ?? null;
+        $targetCurrencyId = $data['target_currency_id'] ?? null;
+        $createBackup = $data['create_backup'] ?? false;
+        $companyId = null;
+
+        if ($userRole !== 'super_admin') {
+            $companyId = $this->getCompanyId($userId);
+        } else {
+            $companyId = $data['company_id'] ?? null;
+        }
+
+        if (!$startDate || !$endDate || !$targetCurrencyId) {
+            Response::validationError(['message' => 'Faltan parámetros requeridos']);
+            return;
+        }
+
+        try {
+            $currencyModel = new \App\Models\Currency();
+            $exchangeRateModel = new \App\Models\ExchangeRate();
+
+            // Verificar la moneda destino
+            $targetCurrency = $currencyModel->find($targetCurrencyId);
+            if (!$targetCurrency) {
+                Response::notFound('Moneda destino no encontrada');
+                return;
+            }
+
+            // Obtener moneda base actual
+            $baseCurrency = $currencyModel->getBaseCurrency();
+            if (!$baseCurrency) {
+                Response::error('No hay moneda base configurada', 400);
+                return;
+            }
+
+            // Crear respaldo si se solicitó
+            if ($createBackup) {
+                $this->createBackup('incomes', $startDate, $endDate, $companyId);
+            }
+
+            // ✅ Usar el modelo para obtener las transacciones
+            $transactions = $this->incomeModel->getForReconversion($companyId, $startDate, $endDate);
+
+            $updatedCount = 0;
+            $newTotal = 0;
+            $errors = [];
+
+            foreach ($transactions as $transaction) {
+                // Obtener tasa histórica para convertir de moneda base a moneda destino
+                $rate = $exchangeRateModel->getRate(
+                    $baseCurrency['id'],
+                    $targetCurrencyId,
+                    $transaction['date']
+                );
+
+                if ($rate !== null) {
+                    // Recalcular amount (monto en la moneda destino)
+                    $newAmount = $transaction['amount_base_currency'] / $rate;
+
+                    // ✅ Usar el método del modelo para actualizar
+                    $updated = $this->incomeModel->reconvertCurrency(
+                        $transaction['id'],
+                        $targetCurrencyId,
+                        $newAmount,
+                        $rate
+                    );
+
+                    if ($updated) {
+                        $updatedCount++;
+                        $newTotal += $newAmount;
+                    } else {
+                        $errors[] = "Error actualizando ingreso ID: {$transaction['id']}";
+                    }
+                } else {
+                    $errors[] = "No hay tasa para fecha {$transaction['date']} (de {$baseCurrency['code']} a {$targetCurrency['code']})";
+                }
+            }
+
+            Response::success([
+                'affected' => $updatedCount,
+                'new_total' => $newTotal,
+                'target_currency' => $targetCurrency,
+                'base_currency' => $baseCurrency,
+                'errors' => $errors
+            ], "Reconversión completada: {$updatedCount} ingresos actualizados a {$targetCurrency['code']}");
+        } catch (\Exception $e) {
+            error_log("Error in reconvertIncomes: " . $e->getMessage());
+            Response::error('Error al ejecutar la reconversión: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * POST /api/expenses/reconvert
+     * Ejecutar reconversión masiva de egresos
+     */
+    public function reconvertExpenses(): void
+    {
+        $userId = $this->getUserId();
+        $userRole = $this->getUserRole($userId);
+
+        if ($userId <= 0) {
+            Response::unauthorized('Usuario no autenticado');
+            return;
+        }
+
+        $rawInput = file_get_contents('php://input');
+        $data = json_decode($rawInput, true);
+
+        $startDate = $data['start_date'] ?? null;
+        $endDate = $data['end_date'] ?? null;
+        $targetCurrencyId = $data['target_currency_id'] ?? null;
+        $createBackup = $data['create_backup'] ?? false;
+        $companyId = null;
+
+        if ($userRole !== 'super_admin') {
+            $companyId = $this->getCompanyId($userId);
+        } else {
+            $companyId = $data['company_id'] ?? null;
+        }
+
+        if (!$startDate || !$endDate || !$targetCurrencyId) {
+            Response::validationError(['message' => 'Faltan parámetros requeridos: start_date, end_date, target_currency_id']);
+            return;
+        }
+
+        try {
+            $currencyModel = new \App\Models\Currency();
+            $targetCurrency = $currencyModel->find($targetCurrencyId);
+
+            if (!$targetCurrency) {
+                Response::notFound('Moneda destino no encontrada');
+                return;
+            }
+
+            if ($createBackup) {
+                $this->createBackup('expenses', $startDate, $endDate, $companyId);
+            }
+
+            $transactions = $this->expenseModel->getForReconversion($companyId, $startDate, $endDate);
+
+            $updatedCount = 0;
+            $newTotal = 0;
+            $errors = [];
+
+            foreach ($transactions as $transaction) {
+                $rate = $this->exchangeRateModel->getRate(
+                    $transaction['currency_id'],
+                    $targetCurrencyId,
+                    $transaction['date']
+                );
+
+                if ($rate !== null) {
+                    $newAmount = $transaction['amount_base_currency'] * $rate;
+
+                    if ($this->expenseModel->updateBaseAmount($transaction['id'], $newAmount, $rate)) {
+                        $updatedCount++;
+                        $newTotal += $newAmount;
+                    } else {
+                        $errors[] = "Error actualizando egreso ID: {$transaction['id']}";
+                    }
+                } else {
+                    $errors[] = "No hay tasa para egreso ID: {$transaction['id']} en fecha {$transaction['date']}";
+                }
+            }
+
+            $currencyModel->setAsBaseCurrency($targetCurrencyId);
+
+            Response::success([
+                'affected' => $updatedCount,
+                'new_total' => $newTotal,
+                'target_currency' => $targetCurrency,
+                'errors' => $errors
+            ], "Reconversión completada: {$updatedCount} egresos actualizados");
+        } catch (\Exception $e) {
+            error_log("Error in reconvertExpenses: " . $e->getMessage());
+            Response::error('Error al ejecutar la reconversión: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Crear respaldo de datos
+     */
+    private function createBackup(string $table, string $startDate, string $endDate, ?int $companyId): void
+    {
+        try {
+            $db = \App\Config\Database::getInstance()->getConnection();
+            $backupTable = $table . '_backup_' . date('Ymd_His');
+
+            // Crear tabla de respaldo
+            $sql = "CREATE TABLE IF NOT EXISTS `{$backupTable}` LIKE `{$table}`";
+            $db->exec($sql);
+
+            // Insertar datos
+            $sql = "INSERT INTO `{$backupTable}` SELECT * FROM `{$table}` 
+                WHERE date BETWEEN :start_date AND :end_date";
+            $params = [
+                ':start_date' => $startDate,
+                ':end_date' => $endDate
+            ];
+
+            if ($companyId && $companyId > 0) {
+                $sql .= " AND company_id = :company_id";
+                $params[':company_id'] = $companyId;
+            }
+
+            $stmt = $db->prepare($sql);
+            foreach ($params as $key => $value) {
+                $stmt->bindValue($key, $value);
+            }
+            $stmt->execute();
+
+            error_log("Backup created: {$backupTable}");
+        } catch (\Exception $e) {
+            error_log("Error creating backup: " . $e->getMessage());
+        }
     }
 }

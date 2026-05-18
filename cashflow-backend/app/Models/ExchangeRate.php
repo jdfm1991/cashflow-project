@@ -165,29 +165,69 @@ class ExchangeRate extends BaseModel
         return $stmt->fetchAll();
     }
 
-/**
- * Buscar tasa de cambio por monedas y fecha específica
- * 
- * @param int $fromCurrencyId
- * @param int $toCurrencyId
- * @param string $date
- * @return array|null
- */
-public function findByCurrenciesAndDate(int $fromCurrencyId, int $toCurrencyId, string $date): ?array
-{
-    $sql = "SELECT * FROM {$this->table} 
+    /**
+     * Buscar tasa de cambio por monedas y fecha específica
+     * 
+     * @param int $fromCurrencyId
+     * @param int $toCurrencyId
+     * @param string $date
+     * @return array|null
+     */
+    public function findByCurrenciesAndDate(int $fromCurrencyId, int $toCurrencyId, string $date): ?array
+    {
+        $sql = "SELECT * FROM {$this->table} 
             WHERE from_currency_id = :from_id 
             AND to_currency_id = :to_id 
             AND effective_date = :date";
-    
-    $stmt = $this->db->prepare($sql);
-    $stmt->execute([
-        'from_id' => $fromCurrencyId,
-        'to_id' => $toCurrencyId,
-        'date' => $date
-    ]);
-    
-    $result = $stmt->fetch();
-    return $result ?: null;
-}
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([
+            'from_id' => $fromCurrencyId,
+            'to_id' => $toCurrencyId,
+            'date' => $date
+        ]);
+
+        $result = $stmt->fetch();
+        return $result ?: null;
+    }
+
+    // app/Models/ExchangeRate.php - Agregar este método
+
+    /**
+     * Obtener tasas históricas para un período
+     */
+    public function getHistoricalRates(int $fromCurrencyId, int $toCurrencyId, ?string $startDate, ?string $endDate): array
+    {
+        $sql = "SELECT * FROM {$this->table} 
+            WHERE from_currency_id = :from_id 
+            AND to_currency_id = :to_id";
+        $params = [
+            ':from_id' => $fromCurrencyId,
+            ':to_id' => $toCurrencyId
+        ];
+
+        if ($startDate) {
+            $sql .= " AND effective_date >= :start_date";
+            $params[':start_date'] = $startDate;
+        }
+        if ($endDate) {
+            $sql .= " AND effective_date <= :end_date";
+            $params[':end_date'] = $endDate;
+        }
+
+        $sql .= " ORDER BY effective_date ASC";
+
+        $stmt = $this->db->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value);
+        }
+        $stmt->execute();
+        $results = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        foreach ($results as &$rate) {
+            $rate['rate'] = (float) $rate['rate'];
+        }
+
+        return $results;
+    }
 }

@@ -1,5 +1,4 @@
 <?php
-// app/Config/Routes.php
 return [
     // ============================================
     // RUTAS PÚBLICAS
@@ -96,7 +95,6 @@ return [
         'middleware' => ['AuthMiddleware']
     ],
 
-    // app/Config/Routes.php
 
     // ============================================
     // RUTAS DE MIGRACIÓN DE DATOS
@@ -488,6 +486,7 @@ return [
         'middleware' => ['AuthMiddleware']
     ],
 
+
     // ============================================
     // RUTAS DE EGRESOS
     // ============================================
@@ -529,6 +528,51 @@ return [
         'pattern' => '#^api/expenses/(\d+)$#',
         'controller' => 'App\\Controllers\\TransactionController',
         'action' => 'deleteExpense',
+        'middleware' => ['AuthMiddleware']
+    ],
+
+    // ============================================
+    // RUTAS DE RECONVERSIÓN
+    // ============================================
+
+    // Estadísticas para reconversión
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/incomes/stats$#',
+        'controller' => 'App\\Controllers\\TransactionController',
+        'action' => 'getIncomeStats',
+        'middleware' => ['AuthMiddleware']
+    ],
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/expenses/stats$#',
+        'controller' => 'App\\Controllers\\TransactionController',
+        'action' => 'getExpenseStats',
+        'middleware' => ['AuthMiddleware']
+    ],
+
+    // Reconversión masiva
+    [
+        'method' => 'POST',
+        'pattern' => '#^api/incomes/reconvert$#',
+        'controller' => 'App\\Controllers\\TransactionController',
+        'action' => 'reconvertIncomes',
+        'middleware' => ['AuthMiddleware']
+    ],
+    [
+        'method' => 'POST',
+        'pattern' => '#^api/expenses/reconvert$#',
+        'controller' => 'App\\Controllers\\TransactionController',
+        'action' => 'reconvertExpenses',
+        'middleware' => ['AuthMiddleware']
+    ],
+
+    // Tasas históricas
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/exchange-rates/historical$#',
+        'controller' => 'App\\Controllers\\ExchangeRateController',
+        'action' => 'getHistoricalRates',
         'middleware' => ['AuthMiddleware']
     ],
 
@@ -663,7 +707,14 @@ return [
         'middleware' => ['AuthMiddleware']
     ],
 
-    // app/Config/Routes.php - Agregar después de las rutas de bancos
+    // Agregar esta ruta después de las rutas de monedas
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/currencies/default$#',
+        'controller' => 'App\\Controllers\\CurrencyController',
+        'action' => 'getDefault',
+        'middleware' => ['AuthMiddleware']
+    ],
 
     // ============================================
     // RUTAS DE TASAS DE CAMBIO
