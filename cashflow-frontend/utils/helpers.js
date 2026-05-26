@@ -68,14 +68,18 @@ export const formatNumber = (number, decimals = 2) => {
 // ============================================
 // FORMATO DE FECHAS
 // ============================================
-
 export const formatDate = (dateString) => {
     if (!dateString) return '';
-    const date = new Date(dateString);
+    
+    // ✅ Método 1: Extraer año, mes, día directamente de la cadena (recomendado)
+    const [year, month, day] = dateString.split('-');
+    const date = new Date(Date.UTC(year, month - 1, day));
+    
     return date.toLocaleDateString('es-VE', {
         year: 'numeric',
         month: 'short',
-        day: 'numeric'
+        day: 'numeric',
+        timeZone: 'UTC'  // Forzar UTC para evitar desplazamiento
     });
 };
 

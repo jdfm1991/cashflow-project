@@ -770,7 +770,7 @@ abstract class Transaction extends BaseModel
     public function updateBaseAmount(int $id, float $newAmount, float $newRate): bool
     {
         $sql = "UPDATE {$this->table} 
-            SET amount_base_currency = :new_amount,
+            SET amount = :new_amount,
                 exchange_rate = :new_rate,
                 updated_at = NOW()
             WHERE id = :id";
@@ -814,5 +814,4 @@ abstract class Transaction extends BaseModel
             return false;
         }
     }
-     
 }

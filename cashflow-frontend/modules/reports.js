@@ -503,41 +503,43 @@ export const reportsModule = {
         const endDate = document.getElementById('filterEndDate').value;
         const groupBy = document.getElementById('groupBy').value;
 
-        // ✅ Asegurar que tenemos la información de la empresa antes de exportar
-        let companyInfoForPdf = this.companyInfo;
-        let companyLogoPdf = this.companyLogo;
+        // ✅ Obtener información de la empresa
+        let companyInfoForPdf = null;
+        let companyLogo = null;
 
-        // Si es super_admin y hay una empresa seleccionada, cargar sus datos
-        if (isSuperAdmin && companyId && companyId !== '') {
+        if (companyId && companyId !== '') {
             try {
+                // Intentar obtener la empresa por ID
                 const companyResponse = await companyService.getById(parseInt(companyId));
                 if (companyResponse.success && companyResponse.data) {
                     companyInfoForPdf = companyResponse.data;
-                    console.log('Empresa cargada para PDF:', companyInfoForPdf);
+                    //companyLogo = companyInfoForPdf?.logo || null;
+                    console.log('✅ Empresa cargada:', companyInfoForPdf);
+                }
+                //intentar obtener el logo de la empresa
+                const logoResponse = await companyService.getLogo(parseInt(companyId));                
+                if (logoResponse.ok && logoResponse.url) {
+                    companyLogo = logoResponse.url;
+                    console.log('✅ Logo cargado:', companyLogo);
                 }
             } catch (error) {
-                console.error('Error loading company for PDF:', error);
-                companyInfoForPdf = null;
+                console.error('Error loading company:', error);
             }
-        }
-        // Si es super_admin y hay una empresa seleccionada, del logo de la empresa
-        if (isSuperAdmin && companyId && companyId !== '') {
-            try {
-                const logoResponse = await companyService.getLogo(parseInt(companyId));
-                if (logoResponse.url) {
-                    companyLogoPdf = logoResponse.url;
-                    console.log('Logo de  la Empresa cargada para PDF:', companyLogoPdf);
-                }
-            } catch (error) {
-                console.error('Error loading company for PDF:', error);
-                companyLogoPdf = null;
-            }
+        } else if (!isSuperAdmin && this.companyInfo) {
+            // Usuario normal, usar su empresa
+            companyInfoForPdf = this.companyInfo;
+            companyLogo = companyInfoForPdf?.logo || null;
+            console.log('✅ Empresa del usuario:', companyInfoForPdf);
         }
 
-        // Si no hay empresa seleccionada (ver todas), usar null para mostrar solo FlowControl
-        if (!companyId || companyId === '') {
-            companyInfoForPdf = null;
-            companyLogoPdf = null;
+        // Si no hay empresa, usar valores por defecto
+        if (!companyInfoForPdf) {
+            companyInfoForPdf = {
+                name: 'FlowControl',
+                business_name: 'Sistema de Flujo de Caja',
+                tax_id: ''
+            };
+            console.log('⚠️ Usando empresa por defecto');
         }
 
         // ✅ Obtener saldos bancarios
@@ -551,18 +553,81 @@ export const reportsModule = {
             console.error('Error loading bank balances:', error);
         }
 
+        // ✅ Obtener la tasa de cambio más reciente
+        let latestExchangeRate = null;
+        try {
+            const rateResponse = await api.get('api/exchange-rates/latest');
+            if (rateResponse.success && rateResponse.data) {
+                latestExchangeRate = rateResponse.data;
+            }
+        } catch (error) {
+            console.error('Error loading exchange rate:', error);
+        }
+
+        // ✅ Calcular totales reales desde los datos
+        const totals = this.calculateTotalsFromData(this.reportData);
+
+        // ✅ LOG para depuración
+        console.log('=== Datos enviados a PDF ===');
+        console.log('companyInfoForPdf:', companyInfoForPdf);
+        console.log('companyLogo:', companyLogo);
+        console.log('bankBalances:', bankBalances);
+        console.log('latestExchangeRate:', latestExchangeRate);
+
         // Delegar toda la lógica de PDF al servicio
         pdfExportService.exportFinancialReportToPDF(
             this.reportData,
             { startDate, endDate, groupBy },
-            companyInfoForPdf,  // ✅ Pasar la información correcta de la empresa
-            companyLogoPdf, // ✅ Pasar el logo de la empresa
+            companyInfoForPdf,
+            companyLogo,
             reportService.accounts,
-            bankBalances  // ✅ Pasar los saldos bancarios
+            bankBalances,
+            latestExchangeRate,
+            totals
         );
 
         const companyText = companyInfoForPdf?.name ? `de ${companyInfoForPdf.name}` : 'general';
         showAlert(`Generando PDF ${companyText}...`, 'success');
+    },
+
+    /**
+     * Calcular totales reales desde los datos del reporte
+     */
+    calculateTotalsFromData(reportData) {
+        let totalIncomeBase = 0;
+        let totalIncomeDivisa = 0;
+        let totalExpenseBase = 0;
+        let totalExpenseDivisa = 0;
+
+        for (const period of reportData) {
+            totalIncomeBase += period.totalIncome;
+            totalExpenseBase += period.totalExpense;
+
+            // Sumar divisas por moneda
+            if (period.incomeByCurrency) {
+                for (const [currency, amount] of Object.entries(period.incomeByCurrency)) {
+                    if (currency !== this.baseCurrency?.code) {
+                        totalIncomeDivisa += amount;
+                    }
+                }
+            }
+            if (period.expenseByCurrency) {
+                for (const [currency, amount] of Object.entries(period.expenseByCurrency)) {
+                    if (currency !== this.baseCurrency?.code) {
+                        totalExpenseDivisa += amount;
+                    }
+                }
+            }
+        }
+
+        return {
+            totalIncomeBase,
+            totalIncomeDivisa,
+            totalExpenseBase,
+            totalExpenseDivisa,
+            totalBalanceBase: totalIncomeBase - totalExpenseBase,
+            totalBalanceDivisa: totalIncomeDivisa - totalExpenseDivisa
+        };
     },
 
     setupEventListeners(isSuperAdmin) {

@@ -1,5 +1,5 @@
 <?php
-// app/Controllers/TransactionController.php
+
 declare(strict_types=1);
 
 namespace App\Controllers;
@@ -192,9 +192,6 @@ class TransactionController
             Response::validationError(['account_id' => 'Cuenta no válida para ingreso']);
             return;
         }
-
-        // app/Controllers/TransactionController.php - En createIncome
-
         // ========== MANEJO DE MONEDA Y CONVERSIÓN ==========
         // ✅ PRIORIZAR valores enviados por el frontend
 
@@ -794,8 +791,6 @@ class TransactionController
      * - Para super_admin: puede editar cualquier egreso (con restricciones según tipo)
      * - Para otros roles: solo egresos de su empresa
      */
-    // app/Controllers/TransactionController.php - updateExpense
-
     public function updateExpense(int $id): void
     {
         $rawInput = file_get_contents('php://input');
@@ -815,6 +810,9 @@ class TransactionController
             return;
         }
 
+        // Guardar datos originales para revertir saldo
+        $oldExpenseData = $expense;
+
         // Validación de permisos
         if ($userRole !== 'super_admin') {
             $companyId = $this->getCompanyId($userId);
@@ -823,8 +821,6 @@ class TransactionController
                 return;
             }
         }
-
-        // ========== Egreso en efectivo ==========
 
         // Validaciones básicas
         $validator = new Validator($data ?? []);
@@ -892,14 +888,14 @@ class TransactionController
         $newAmount = isset($data['amount']) ? (float) $data['amount'] : $expense['amount'];
         $newCurrencyId = isset($data['currency_id']) ? (int) $data['currency_id'] : $expense['currency_id'];
 
-        // ✅ VERIFICAR si el frontend ya envió valores calculados
+        // VERIFICAR si el frontend ya envió valores calculados
         $newExchangeRate = isset($data['exchange_rate']) ? (float) $data['exchange_rate'] : null;
         $newAmountBaseCurrency = isset($data['amount_base_currency']) ? (float) $data['amount_base_currency'] : null;
 
         $updateData['amount'] = $newAmount;
         $updateData['currency_id'] = $newCurrencyId;
 
-        // ✅ SOLO recalcular si el frontend NO envió los valores
+        // SOLO recalcular si el frontend NO envió los valores
         if ($newExchangeRate !== null && $newAmountBaseCurrency !== null) {
             $updateData['exchange_rate'] = $newExchangeRate;
             $updateData['amount_base_currency'] = $newAmountBaseCurrency;
@@ -930,26 +926,26 @@ class TransactionController
             }
         }
 
-        // ... obtener el expense original antes de actualizar ...
-        $oldExpense = $this->expenseModel->find($id);
-
-        // Actualizar
         $updated = $this->expenseModel->update($id, $updateData);
 
         if ($updated) {
-            // ✅ Revertir saldo anterior y aplicar nuevo
+            // ✅ CORREGIDO: Usar BankBalanceService correctamente
             $bankBalanceService = new \App\Services\BankBalanceService();
 
-            // Revertir el saldo de la transacción anterior
-            $bankBalanceService->revertBalance('expense', $oldExpense);
+            // Revertir saldo anterior (solo si era bancario)
+            if (isset($oldExpenseData['payment_method']) && $oldExpenseData['payment_method'] === 'bank') {
+                $bankBalanceService->revertBalance('expense', $oldExpenseData);
+            }
 
-            // Aplicar el saldo de la nueva transacción
-            $newIncome = $this->incomeModel->find($id);
-            $bankBalanceService->processIncomeBalance($newIncome);
+            // Aplicar nuevo saldo
+            $newExpenseData = $this->expenseModel->find($id);
+            if ($newExpenseData && isset($newExpenseData['payment_method']) && $newExpenseData['payment_method'] === 'bank') {
+                $bankBalanceService->processExpenseBalance($newExpenseData);
+            }
 
             Response::success($updated, 'Egreso actualizado exitosamente');
         } else {
-            Response::error('Error al actualizar el Egreso', 500);
+            Response::error('Error al actualizar el egreso', 500);
         }
     }
     /**
@@ -1298,7 +1294,7 @@ class TransactionController
                 );
 
                 if ($rate !== null) {
-                    $newAmount = $transaction['amount_base_currency'] * $rate;
+                    $newAmount = $transaction['amount_base_currency'] / $rate;
 
                     if ($this->expenseModel->updateBaseAmount($transaction['id'], $newAmount, $rate)) {
                         $updatedCount++;
@@ -1311,7 +1307,7 @@ class TransactionController
                 }
             }
 
-            $currencyModel->setAsBaseCurrency($targetCurrencyId);
+            //$currencyModel->setAsBaseCurrency($targetCurrencyId);
 
             Response::success([
                 'affected' => $updatedCount,

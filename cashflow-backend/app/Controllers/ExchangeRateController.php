@@ -307,4 +307,37 @@ class ExchangeRateController
             Response::error('Error al obtener tasas históricas: ' . $e->getMessage(), 500);
         }
     }
+
+    /**
+     * GET /api/exchange-rates/latest
+     * Obtener la tasa de cambio más reciente
+     */
+    public function getLatest(): void
+    {
+        $fromCurrency = $_GET['from'] ?? null;
+        $toCurrency = $_GET['to'] ?? null;
+
+        // Si no se especifican, usar USD a VES o viceversa según configuración
+        if (!$fromCurrency || !$toCurrency) {
+            $currencyModel = new \App\Models\Currency();
+            $baseCurrency = $currencyModel->getBaseCurrency();
+            $defaultCurrency = $currencyModel->getDefaultCurrency();
+
+            $fromCurrency = $baseCurrency['id'] ?? 9;  // VES
+            $toCurrency = $defaultCurrency['id'] ?? 2; // USD
+        }
+
+        $rate = $this->exchangeRateModel->getRate((int)$fromCurrency, (int)$toCurrency);
+
+        if ($rate) {
+            Response::success([
+                'from_currency_id' => (int)$fromCurrency,
+                'to_currency_id' => (int)$toCurrency,
+                'rate' => $rate,
+                'date' => date('Y-m-d')
+            ]);
+        } else {
+            Response::notFound('No hay tasa de cambio configurada');
+        }
+    }
 }

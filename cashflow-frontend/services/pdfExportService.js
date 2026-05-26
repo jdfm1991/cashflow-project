@@ -80,8 +80,6 @@ export const pdfExportService = {
         return this.exportToPDF(incomes, filters, groupBy, isSuperAdmin, showAllCompanies, includeDetailedTables, 'income');
     },
 
-    // Agregar este método al pdfExportService.js
-
     /**
      * Exportar reporte financiero a PDF
      * @param {Array} reportData - Datos del reporte (agrupados por período)
@@ -89,7 +87,7 @@ export const pdfExportService = {
      * @param {Object} companyInfo - Información de la empresa { name, business_name, tax_id, logo }
      * @param {Array} accounts - Lista de cuentas para obtener categorías
      */
-    exportFinancialReportToPDF(reportData, filters, companyInfo = null, companyLogo = null, accounts = [], bankBalances = []) {
+    exportFinancialReportToPDF(reportData, filters, companyInfo = null, companyLogo = null, accounts = [], bankBalances = [], latestExchangeRate = null, preCalculatedTotals = null) {
         if (!reportData || reportData.length === 0) {
             console.warn('No hay datos para exportar');
             return;
@@ -97,17 +95,43 @@ export const pdfExportService = {
 
         const { startDate, endDate, groupBy } = filters;
 
-        // ✅ Depuración
-        console.log('=== PDF Export Debug ===');
-        console.log('companyInfo:', companyInfo);
-        console.log('bankBalances:', bankBalances);
-
+        // ✅ Asegurar que companyInfo tenga valores por defecto
         const companyName = companyInfo?.name || 'FlowControl';
         const businessName = companyInfo?.business_name || '';
         const taxId = companyInfo?.tax_id || '';
-        const logo = companyLogo || null;
 
-        const totals = this.calculateTotals(reportData);
+        // ✅ Para el logo, puede venir como companyLogo o dentro de companyInfo.logo
+        let logo = companyLogo || companyInfo?.logo || null;
+
+        // ✅ Si el logo es una ruta relativa, convertir a URL absoluta
+        if (logo && !logo.startsWith('http') && !logo.startsWith('data:')) {
+            const baseUrl = window.location.origin;
+            logo = `${baseUrl}/cashflow-project/cashflow-backend/public/${logo}`;
+        }
+
+        // ✅ LOG para depuración
+        console.log('=== exportFinancialReportToPDF ===');
+        console.log('companyInfo recibido:', companyInfo);
+        console.log('companyLogo recibido:', companyLogo);
+        console.log('Logo final:', logo);
+        console.log('Company Name:', companyName);
+        console.log('Business Name:', businessName);
+        console.log('Tax ID:', taxId);
+
+        // ✅ Obtener tasa de cambio real
+        const exchangeRate = latestExchangeRate?.rate || 1;
+        const baseCurrency = latestExchangeRate?.from_currency_code || 'VES';
+        const defaultCurrency = latestExchangeRate?.to_currency_code || 'USD';
+
+        // ✅ Usar totales precalculados o calcular desde cero
+        let totals;
+        if (preCalculatedTotals) {
+            totals = preCalculatedTotals;
+        } else {
+            totals = this.calculateRealTotals(reportData);
+        }
+
+        // ✅ Ordenar datos
         const sortedData = [...reportData].sort((a, b) => {
             if (groupBy === 'year') return a.year - b.year;
             if (groupBy === 'month') return a.sortKey - b.sortKey;
@@ -115,18 +139,25 @@ export const pdfExportService = {
             return 0;
         });
 
-        // ✅ Calcular resumen mensual para la tabla
-        const monthlySummary = this.calculateMonthlySummary(sortedData, groupBy);
+        // ✅ Calcular resumen mensual con montos reales
+        const monthlySummary = this.calculateMonthlySummaryWithCurrency(sortedData, groupBy, defaultCurrency);
 
         // ✅ Calcular ganancias/pérdidas mensuales
         const monthlyProfitLoss = monthlySummary.map(month => ({
             period: month.period,
             income: month.totalIncome,
             expense: month.totalExpense,
-            profitLoss: month.totalIncome - month.totalExpense
+            profitLoss: month.totalIncome - month.totalExpense,
+            incomeDivisa: month.totalIncomeDivisa || 0,
+            expenseDivisa: month.totalExpenseDivisa || 0,
+            profitLossDivisa: (month.totalIncomeDivisa || 0) - (month.totalExpenseDivisa || 0)
         }));
 
-        const reportHtml = this.generateFinancialReportHTML(sortedData, {
+        // ✅ Calcular totales de saldos bancarios
+        const totalBankBase = bankBalances.reduce((sum, b) => sum + (parseFloat(b.current_balance) || 0), 0);
+        const totalBankDivisa = totalBankBase / exchangeRate;
+
+        const reportHtml = this.generateFinancialReportHTMLImproved(sortedData, {
             startDate,
             endDate,
             groupBy,
@@ -137,7 +168,12 @@ export const pdfExportService = {
             totals,
             monthlySummary,
             monthlyProfitLoss,
-            bankBalances
+            bankBalances,
+            exchangeRate,
+            baseCurrency,
+            defaultCurrency,
+            totalBankBase,
+            totalBankDivisa
         }, accounts);
 
         const printWindow = window.open('', '_blank');
@@ -153,6 +189,665 @@ export const pdfExportService = {
         setTimeout(() => {
             printWindow.print();
         }, 1500);
+    },
+
+    generateFinancialReportHTMLImproved(reportData, metadata, accounts) {
+        const {
+            startDate,
+            endDate,
+            groupBy,
+            companyName,
+            businessName,
+            taxId,
+            logo,
+            totals,
+            monthlySummary,
+            monthlyProfitLoss,
+            bankBalances,
+            exchangeRate,
+            baseCurrency,
+            defaultCurrency,
+            totalBankBase,
+            totalBankDivisa
+        } = metadata;
+
+        const groupByText = groupBy === 'year' ? 'Año' : (groupBy === 'month' ? 'Mes' : 'Trimestre');
+        const periodData = reportData;
+
+        // Función helper para formatear números
+        const formatNumberFn = (value) => {
+            if (value === null || value === undefined || isNaN(value)) return '0.00';
+            return value.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        };
+
+        return `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Reporte Financiero - ${this.escapeHtml(companyName)}</title>
+                <meta charset="UTF-8">
+                <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+                <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    
+                    @media print {
+                        body { margin: 0; padding: 0; }
+                        .no-print { display: none; }
+                        .period-section, .chart-container { page-break-inside: avoid; }
+                        @page { margin: 1.5cm; }
+                    }
+                    
+                    @media screen {
+                        body { background: #f0f2f5; padding: 20px; }
+                        .report-container { 
+                            max-width: 1200px; 
+                            margin: 0 auto; 
+                            background: white; 
+                            box-shadow: 0 0 20px rgba(0,0,0,0.1); 
+                            border-radius: 8px;
+                        }
+                        .print-button { 
+                            position: fixed; 
+                            bottom: 20px; 
+                            right: 20px; 
+                            background: #007bff; 
+                            color: white; 
+                            border: none; 
+                            padding: 12px 24px; 
+                            border-radius: 8px; 
+                            cursor: pointer; 
+                            font-size: 16px; 
+                            font-weight: bold; 
+                            z-index: 1000; 
+                        }
+                        .print-button:hover { background: #0056b3; }
+                    }
+                    
+                    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; line-height: 1.4; }
+                    
+                    /* Header - solo en primera página */
+                    .pdf-header {
+                        display: grid;
+                        grid-template-columns: 10% 60% 20%;
+                        gap: 15px;
+                        align-items: center;
+                        padding: 12px 20px;
+                        background: white;
+                        border-bottom: 3px solid #007bff;
+                        margin-bottom: 20px;
+                    }
+                    
+                    .header-logo { text-align: center; padding: 5px; }
+                    .header-logo img { max-width: 100px; max-height: 85px; object-fit: contain; }
+                    .default-logo {
+                        width: 100px; height: 100px;
+                        background: linear-gradient(135deg, #007bff, #0056b3);
+                        border-radius: 50%;
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                        color: white;
+                        font-size: 22px;
+                        font-weight: bold;
+                        margin: 0 auto;
+                    }
+                    
+                    .header-company { text-align: left; }
+                    .header-company h1 { font-size: 16px; margin: 0 0 5px 0; color: #007bff; }
+                    .header-company .company-name { font-size: 13px; font-weight: bold; margin: 0; color: #333; }
+                    .header-company .business-name { font-size: 10px; color: #6c757d; margin: 3px 0; }
+                    .header-company .tax-id { font-size: 10px; color: #6c757d; margin: 2px 0; }
+                    
+                    .header-dates { text-align: right; font-size: 10px; color: #495057; }
+                    .header-dates p { margin: 3px 0; }
+                    .header-dates .report-title { font-weight: bold; font-size: 16px; color: #007bff; margin-bottom: 5px; }
+                    
+                    /* Tarjetas de resumen */
+                    .summary-cards { display: flex; gap: 15px; margin-bottom: 30px; flex-wrap: wrap; }
+                    .card { flex: 1; min-width: 150px; padding: 15px; border-radius: 8px; text-align: center; color: white; }
+                    .card-success { background: #28a745; }
+                    .card-danger { background: #dc3545; }
+                    .card-primary { background: #007bff; }
+                    .card-warning { background: #ffc107; color: #333; }
+                    .card-title { font-size: 12px; opacity: 0.9; margin-bottom: 8px; text-transform: uppercase; }
+                    .card-value { font-size: 22px; font-weight: bold; }
+                    .dual-currency { font-size: 16px; color: rgba(255,255,255,0.9); margin-top: 8px; }
+                    
+                    /* Gráficas */
+                    .chart-container { margin-bottom: 30px; padding: 15px; background: #f8f9fa; border-radius: 8px; }
+                    .chart-container h3 { margin-bottom: 15px; color: #333; font-size: 16px; }
+                    
+                    /* Tablas */
+                    .section-title {
+                        background: #343a40;
+                        color: white;
+                        padding: 10px 15px;
+                        margin: 25px 0 15px 0;
+                        border-radius: 6px;
+                        font-size: 16px;
+                    }
+                    
+                    .summary-table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin: 15px 0 20px 0;
+                        font-size: 16px;
+                    }
+                    .summary-table th, .summary-table td {
+                        padding: 10px 8px;
+                        border: 1px solid #dee2e6;
+                    }
+                    .summary-table th {
+                        background: #343a40;
+                        color: white;
+                        text-align: center;
+                        font-size: 12px;
+                    }
+                    .summary-table td { text-align: right; }
+                    .summary-table td:first-child { text-align: left; font-weight: bold; }
+                    .summary-table tfoot td { background: #e9ecef; font-weight: bold; }
+                    
+                    /* Períodos */
+                    .period-section { margin-bottom: 30px; border: 1px solid #dee2e6; border-radius: 8px; overflow: hidden; break-inside: avoid; }
+                    .period-header { background: #343a40; color: white; padding: 12px 15px; }
+                    .period-header h2 { margin: 0 0 5px; font-size: 16px; }
+                    .period-summary { font-size: 16px; opacity: 0.8; }
+                    .period-content { display: flex; flex-wrap: wrap; }
+                    .income-section, .expense-section { flex: 1; min-width: 280px; padding: 15px; }
+                    .income-section { border-right: 1px solid #dee2e6; }
+                    .expense-section { border-left: 1px solid #dee2e6; }
+                    .income-title { color: #28a745; font-size: 16px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 2px solid #28a745; font-weight: bold; }
+                    .expense-title { color: #dc3545; font-size: 16px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 2px solid #dc3545; font-weight: bold; }
+                    
+                    /* Categorías y cuentas */
+                    .category-group { margin-bottom: 15px; }
+                    .category-header { 
+                        background: #f8f9fa; 
+                        padding: 8px 12px; 
+                        border-radius: 6px; 
+                        display: flex; 
+                        justify-content: space-between; 
+                        font-size: 13px;
+                        font-weight: bold;
+                    }
+                    .percent-badge { 
+                        background: #e9ecef; 
+                        padding: 2px 8px; 
+                        border-radius: 12px; 
+                        font-size: 16px; 
+                        margin-left: 8px; 
+                        font-weight: normal;
+                    }
+                    .category-accounts { padding-left: 20px; margin-top: 8px; }
+                    .account-row { 
+                        display: flex; 
+                        justify-content: space-between; 
+                        padding: 6px 0; 
+                        font-size: 12px; 
+                        border-bottom: 1px dashed #e9ecef;
+                    }
+                    .account-row span:first-child { color: #495057; }
+                    .account-row span:last-child { font-weight: 500; }
+                    .section-total { 
+                        margin-top: 15px; 
+                        padding-top: 10px; 
+                        text-align: right; 
+                        font-weight: bold; 
+                        font-size: 13px; 
+                        border-top: 2px solid #dee2e6;
+                    }
+                    .empty-message { text-align: center; color: #6c757d; padding: 20px; font-style: italic; font-size: 12px; }
+                    
+                    /* Saldos bancarios */
+                    .bank-balances-table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin-top: 10px;
+                        font-size: 16px;
+                    }
+                    .bank-balances-table th {
+                        background: #007bff;
+                        color: white;
+                        padding: 10px;
+                        text-align: left;
+                        font-size: 16px;
+                    }
+                    .bank-balances-table td {
+                        padding: 8px;
+                        border-bottom: 1px solid #dee2e6;
+                    }
+                    .bank-balances-table td.text-right { text-align: right; }
+                    
+                    /* Utilidades */
+                    .profit-positive { color: #28a745; font-weight: bold; }
+                    .profit-negative { color: #dc3545; font-weight: bold; }
+                    .text-right { text-align: right; }
+                    .footer { text-align: center; margin-top: 30px; padding-top: 15px; border-top: 1px solid #dee2e6; font-size: 9px; color: #6c757d; }
+                </style>
+            </head>
+            <body>
+                <div class="report-container">
+                    <button class="print-button no-print" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+                    
+                    <!-- Header (solo primera página) -->
+                    <div class="pdf-header">
+                        <div class="header-logo">
+                            ${logo ? `<img src="${logo}" class="logo" alt="Logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'"><div class="default-logo" style="display: none;">FC</div>` : `<div class="default-logo">FC</div>`}
+                        </div>
+                        <div class="header-company">
+                            <h1>Reporte de Flujo de Caja</h1>
+                            <div class="company-name">${this.escapeHtml(companyName)}</div>
+                            ${businessName ? `<div class="business-name">${this.escapeHtml(businessName)}</div>` : ''}
+                            ${taxId ? `<div class="tax-id">RIF: ${this.escapeHtml(taxId)}</div>` : ''}
+                        </div>
+                        <div class="header-dates">
+                            <p class="report-title">Reporte Financiero</p>
+                            <p>Período: ${startDate} al ${endDate}</p>
+                            <p>Agrupado por: ${groupByText}</p>
+                            <p>Generado: ${new Date().toLocaleString('es-ES')}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="report-content">
+                        <!-- Tarjetas de resumen -->
+                        <div class="summary-cards">
+                            <div class="card card-success">
+                                <div class="card-title">Total Ingresos</div>
+                                <div class="card-value">${formatNumberFn(totals.totalIncomeBase)} ${baseCurrency}</div>
+                                <div class="dual-currency">≈ ${formatNumberFn(totals.totalIncomeDivisa)} ${defaultCurrency}</div>
+                            </div>
+                            <div class="card card-danger">
+                                <div class="card-title">Total Egresos</div>
+                                <div class="card-value">${formatNumberFn(totals.totalExpenseBase)} ${baseCurrency}</div>
+                                <div class="dual-currency">≈ ${formatNumberFn(totals.totalExpenseDivisa)} ${defaultCurrency}</div>
+                            </div>
+                            <div class="card ${totals.totalBalanceBase >= 0 ? 'card-primary' : 'card-warning'}">
+                                <div class="card-title">Balance Neto</div>
+                                <div class="card-value">${formatNumberFn(totals.totalBalanceBase)} ${baseCurrency}</div>
+                                <div class="dual-currency">≈ ${formatNumberFn(totals.totalBalanceDivisa)} ${defaultCurrency}</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Gráfica de tendencia -->
+                        <div class="chart-container">
+                            <h3>📈 Evolución de Ingresos vs Egresos</h3>
+                            <canvas id="trendChart" height="100"></canvas>
+                        </div>
+                        
+                        <!-- Tabla Resumen por Período -->
+                        <div class="section-title">📊 Resumen de Ingresos y Egresos por Período</div>
+                        <table class="summary-table">
+                            <thead>
+                                <tr>
+                                    <th>Período</th>
+                                    <th>Ingresos (${baseCurrency})</th>
+                                    <th>Ingresos (${defaultCurrency})</th>
+                                    <th>Egresos (${baseCurrency})</th>
+                                    <th>Egresos (${defaultCurrency})</th>
+                                    <th>Balance (${baseCurrency})</th>
+                                    <th>Balance (${defaultCurrency})</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${monthlySummary.map(month => {
+            const balance = month.totalIncome - month.totalExpense;
+            const balanceDivisa = (month.totalIncomeDivisa || 0) - (month.totalExpenseDivisa || 0);
+            return `
+                                    <tr>
+                                        <td><strong>${month.period}</strong></td>
+                                        <td class="text-right">${formatNumberFn(month.totalIncome)}</td>
+                                        <td class="text-right">${formatNumberFn(month.totalIncomeDivisa)}</td>
+                                        <td class="text-right">${formatNumberFn(month.totalExpense)}</td>
+                                        <td class="text-right">${formatNumberFn(month.totalExpenseDivisa)}</td>
+                                        <td class="text-right ${balance >= 0 ? 'profit-positive' : 'profit-negative'}">${formatNumberFn(balance)}</td>
+                                        <td class="text-right ${balanceDivisa >= 0 ? 'profit-positive' : 'profit-negative'}">${formatNumberFn(balanceDivisa)}</td>
+                                    </tr>
+                                    `;
+        }).join('')}
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td><strong>TOTAL GENERAL</strong></td>
+                                    <td class="text-right"><strong>${formatNumberFn(totals.totalIncomeBase)}</strong></td>
+                                    <td class="text-right"><strong>${formatNumberFn(totals.totalIncomeDivisa)}</strong></td>
+                                    <td class="text-right"><strong>${formatNumberFn(totals.totalExpenseBase)}</strong></td>
+                                    <td class="text-right"><strong>${formatNumberFn(totals.totalExpenseDivisa)}</strong></td>
+                                    <td class="text-right ${totals.totalBalanceBase >= 0 ? 'profit-positive' : 'profit-negative'}"><strong>${formatNumberFn(totals.totalBalanceBase)}</strong></td>
+                                    <td class="text-right ${totals.totalBalanceDivisa >= 0 ? 'profit-positive' : 'profit-negative'}"><strong>${formatNumberFn(totals.totalBalanceDivisa)}</strong></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                        
+                        <!-- Gráfica de Ganancias/Pérdidas -->
+                        <div class="chart-container">
+                            <h3>📊 Evolución de Ganancias / Pérdidas por Período</h3>
+                            <canvas id="profitLossChart" height="80"></canvas>
+                        </div>
+                        
+                        <!-- Detalle por período -->
+                        <div class="section-title">📋 Detalle de Transacciones por Período</div>
+                        ${periodData.map(period => this.generatePeriodHTMLImproved(period, groupBy, accounts, baseCurrency, defaultCurrency)).join('')}
+                        
+                        <!-- Saldos Bancarios -->
+                        <div class="section-title">🏦 Saldos Bancarios Actuales</div>
+                        <div class="bank-balances-container">
+                            ${bankBalances && bankBalances.length > 0 ? `
+                            <table class="bank-balances-table">
+                                <thead>
+                                    <tr>
+                                        <th>Banco</th>
+                                        <th>Número de Cuenta</th>
+                                        <th>Tipo</th>
+                                        <th>Moneda</th>
+                                        <th>Saldo Actual (${baseCurrency})</th>
+                                        <th>Saldo Actual (${defaultCurrency})*</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${bankBalances.map(bank => {
+            const saldoDivisa = (parseFloat(bank.current_balance) || 0) / exchangeRate;
+            return `
+                                        <tr>
+                                            <td>${this.escapeHtml(bank.bank_name)}</td>
+                                            <td>${bank.account_number}</td>
+                                            <td>${this.getAccountTypeLabel(bank.account_type)}</td>
+                                            <td>${bank.currency_code || baseCurrency}</td>
+                                            <td class="text-right">${formatNumberFn(parseFloat(bank.current_balance))}</td>
+                                            <td class="text-right">${formatNumberFn(saldoDivisa)}</td>
+                                        </tr>
+                                        `;
+        }).join('')}
+                                </tbody>
+                                <tfoot style="background: #e9ecef; font-weight: bold;">
+                                    <tr>
+                                        <td colspan="4"><strong>TOTAL SALDOS</strong></td>
+                                        <td class="text-right"><strong>${formatNumberFn(totalBankBase)}</strong></td>
+                                        <td class="text-right"><strong>${formatNumberFn(totalBankDivisa)}</strong></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                            <div class="dual-currency" style="margin-top: 10px; font-size: 10px; color: #6c757d;">
+                                * Conversión realizada utilizando tasa de cambio vigente: 1 ${baseCurrency} = ${exchangeRate.toFixed(4)} ${defaultCurrency}
+                            </div>
+                            ` : `<div class="alert alert-info">No hay cuentas bancarias configuradas o activas.</div>`}
+                        </div>
+                        
+                        <div class="footer">
+                            <p>Este reporte fue generado automáticamente por el Sistema de Flujo de Caja</p>
+                            <p>© ${new Date().getFullYear()} - Todos los derechos reservados</p>
+                        </div>
+                    </div>
+                    
+                    <script>
+                        // Formatear número de forma segura
+                        function formatNumberSafe(value) {
+                            if (value === null || value === undefined || isNaN(value)) return '0.00';
+                            return value.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                        }
+                        
+                        window.addEventListener('load', function() {
+                            // Gráfica de tendencia
+                            const ctx = document.getElementById('trendChart').getContext('2d');
+                            const data = ${JSON.stringify(monthlySummary)};
+                            const labels = data.map(d => d.period);
+                            const incomeData = data.map(d => d.totalIncome);
+                            const expenseData = data.map(d => d.totalExpense);
+                            
+                            new Chart(ctx, {
+                                type: 'line',
+                                data: {
+                                    labels: labels,
+                                    datasets: [
+                                        { label: 'Ingresos', data: incomeData, borderColor: '#28a745', backgroundColor: 'rgba(40, 167, 69, 0.1)', fill: true, tension: 0.4, pointBackgroundColor: '#28a745', pointBorderColor: '#fff', pointRadius: 4, pointHoverRadius: 6 },
+                                        { label: 'Egresos', data: expenseData, borderColor: '#dc3545', backgroundColor: 'rgba(220, 53, 69, 0.1)', fill: true, tension: 0.4, pointBackgroundColor: '#dc3545', pointBorderColor: '#fff', pointRadius: 4, pointHoverRadius: 6 }
+                                    ]
+                                },
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: true,
+                                    plugins: { tooltip: { callbacks: { label: function(context) { return context.dataset.label + ': ' + formatNumberSafe(context.raw); } } } },
+                                    scales: { y: { beginAtZero: true, ticks: { callback: function(value) { return formatNumberSafe(value); } } } }
+                                }
+                            });
+                            
+                            // Gráfica de Ganancias/Pérdidas
+                            const profitLossCtx = document.getElementById('profitLossChart').getContext('2d');
+                            const profitLossData = ${JSON.stringify(monthlyProfitLoss)};
+                            const profitLossLabels = profitLossData.map(m => m.period);
+                            const profitLossValues = profitLossData.map(m => m.profitLoss);
+                            
+                            new Chart(profitLossCtx, {
+                                type: 'bar',
+                                data: {
+                                    labels: profitLossLabels,
+                                    datasets: [{
+                                        label: 'Ganancia / Pérdida',
+                                        data: profitLossValues,
+                                        backgroundColor: profitLossValues.map(v => v >= 0 ? 'rgba(40, 167, 69, 0.7)' : 'rgba(220, 53, 69, 0.7)'),
+                                        borderColor: profitLossValues.map(v => v >= 0 ? '#28a745' : '#dc3545'),
+                                        borderWidth: 1
+                                    }]
+                                },
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: true,
+                                    plugins: { tooltip: { callbacks: { label: function(context) { return (context.raw >= 0 ? '💰 Ganancia: ' : '⚠️ Pérdida: ') + formatNumberSafe(Math.abs(context.raw)); } } } },
+                                    scales: { y: { ticks: { callback: function(value) { return formatNumberSafe(value); } } } }
+                                }
+                            });
+                        });
+                    <\/script>
+                </div>
+            </body>
+            </html>
+        `;
+    },
+
+    generatePeriodHTMLImproved(period, groupBy, accounts, baseCurrency, defaultCurrency) {
+        const periodTitle = groupBy === 'year' ? `Año ${period.year}` :
+            (groupBy === 'month' ? `${period.monthName} ${period.year}` :
+                `${period.quarterName} ${period.year}`);
+
+        const balance = period.totalIncome - period.totalExpense;
+        const balanceDivisa = (period.incomeByCurrency?.[defaultCurrency] || 0) - (period.expenseByCurrency?.[defaultCurrency] || 0);
+
+        // Función para agrupar por categoría incluyendo montos en divisa
+        const getGroupedByCategory = (accountsByAccount, isIncome) => {
+            const grouped = {};
+            for (const [accountName, amountBase] of Object.entries(accountsByAccount)) {
+                const accountInfo = accounts.find(a => a.name === accountName);
+                const category = accountInfo?.category || 'Otros';
+
+                // ✅ Obtener el monto en divisa para esta cuenta (usando los datos reales)
+                let amountDivisa = 0;
+                if (isIncome && period.incomeByCurrencyDetails?.[accountName]) {
+                    amountDivisa = period.incomeByCurrencyDetails[accountName][defaultCurrency] || 0;
+                } else if (!isIncome && period.expenseByCurrencyDetails?.[accountName]) {
+                    amountDivisa = period.expenseByCurrencyDetails[accountName][defaultCurrency] || 0;
+                }
+
+                // ✅ Si no hay detalle por moneda, usar el monto original de la transacción
+                // Buscar en las transacciones originales
+                if (amountDivisa === 0) {
+                    const transactions = isIncome ? period.incomes : period.expenses;
+                    const accountTransactions = transactions.filter(t => (t.account_name || 'Sin cuenta') === accountName);
+                    amountDivisa = accountTransactions.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
+                }
+
+                if (!grouped[category]) {
+                    grouped[category] = { totalBase: 0, totalDivisa: 0, accounts: [] };
+                }
+                grouped[category].totalBase += amountBase;
+                grouped[category].totalDivisa += amountDivisa;
+                grouped[category].accounts.push({ name: accountName, amountBase, amountDivisa });
+            }
+            return grouped;
+        };
+
+        const incomeGrouped = getGroupedByCategory(period.incomeByAccount, true);
+        const expenseGrouped = getGroupedByCategory(period.expenseByAccount, false);
+
+        const totalIncomeDivisa = period.incomeByCurrency?.[defaultCurrency] ||
+            period.incomes?.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0) || 0;
+        const totalExpenseDivisa = period.expenseByCurrency?.[defaultCurrency] ||
+            period.expenses?.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0) || 0;
+
+        const renderCategorySection = (groupedData, totalBase, totalDivisa, type) => {
+            const sortedCategories = Object.keys(groupedData).sort((a, b) => groupedData[b].totalBase - groupedData[a].totalBase);
+
+            if (sortedCategories.length === 0) {
+                return '<div class="empty-message">No hay registros</div>';
+            }
+
+            let html = '';
+            for (const category of sortedCategories) {
+                const categoryData = groupedData[category];
+                const categoryPercentBase = totalBase > 0 ? ((categoryData.totalBase / totalBase) * 100).toFixed(1) : 0;
+                const categoryPercentDivisa = totalDivisa > 0 ? ((categoryData.totalDivisa / totalDivisa) * 100).toFixed(1) : 0;
+
+                html += `
+            <div class="category-group">
+                <div class="category-header">
+                    <span><strong>${this.escapeHtml(category)}</strong> 
+                        <span class="percent-badge">${categoryPercentBase}% / ${categoryPercentDivisa}%</span>
+                    </span>
+                    <span><strong>${categoryData.totalBase.toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${baseCurrency}</strong> 
+                        / ${categoryData.totalDivisa.toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${defaultCurrency}</span>
+                </div>
+                <div class="category-accounts">
+                    ${categoryData.accounts
+                        .sort((a, b) => b.amountBase - a.amountBase)
+                        .map(acc => {
+                            const accPercentBase = totalBase > 0 ? ((acc.amountBase / totalBase) * 100).toFixed(1) : 0;
+                            const accPercentDivisa = totalDivisa > 0 ? ((acc.amountDivisa / totalDivisa) * 100).toFixed(1) : 0;
+                            return `
+                            <div class="account-row">
+                                <span>${this.escapeHtml(acc.name)}</span>
+                                <span>${acc.amountBase.toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${baseCurrency} (${accPercentBase}%) / 
+                                      ${acc.amountDivisa.toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${defaultCurrency} (${accPercentDivisa}%)</span>
+                            </div>
+                            `;
+                        }).join('')}
+                </div>
+            </div>
+            `;
+            }
+            return html;
+        };
+
+        return `
+    <div class="period-section">
+        <div class="period-header">
+            <h2>📅 ${periodTitle}</h2>
+            <div class="period-summary">
+                Ingresos: ${period.totalIncome.toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${baseCurrency} / 
+                ${totalIncomeDivisa.toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${defaultCurrency} | 
+                Egresos: ${period.totalExpense.toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${baseCurrency} / 
+                ${totalExpenseDivisa.toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${defaultCurrency} | 
+                Balance: ${balance.toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${baseCurrency} / 
+                ${balanceDivisa.toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${defaultCurrency}
+            </div>
+        </div>
+        <div class="period-content">
+            <div class="income-section">
+                <h3 class="income-title">📈 INGRESOS</h3>
+                ${renderCategorySection(incomeGrouped, period.totalIncome, totalIncomeDivisa, 'income')}
+                <div class="section-total">Total Ingresos: ${period.totalIncome.toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${baseCurrency} / 
+                    ${totalIncomeDivisa.toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${defaultCurrency}</div>
+            </div>
+            <div class="expense-section">
+                <h3 class="expense-title">📉 EGRESOS</h3>
+                ${renderCategorySection(expenseGrouped, period.totalExpense, totalExpenseDivisa, 'expense')}
+                <div class="section-total">Total Egresos: ${period.totalExpense.toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${baseCurrency} / 
+                    ${totalExpenseDivisa.toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${defaultCurrency}</div>
+            </div>
+        </div>
+    </div>
+    `;
+    },
+
+    /**
+     * Calcular totales reales desde los datos (sin división manual)
+     */
+    calculateRealTotals(reportData) {
+        let totalIncomeBase = 0;
+        let totalIncomeDivisa = 0;
+        let totalExpenseBase = 0;
+        let totalExpenseDivisa = 0;
+
+        for (const period of reportData) {
+            totalIncomeBase += period.totalIncome || 0;
+            totalExpenseBase += period.totalExpense || 0;
+
+            // Sumar divisas por moneda
+            if (period.incomeByCurrency) {
+                for (const [currency, amount] of Object.entries(period.incomeByCurrency)) {
+                    totalIncomeDivisa += amount || 0;
+                }
+            }
+            if (period.expenseByCurrency) {
+                for (const [currency, amount] of Object.entries(period.expenseByCurrency)) {
+                    totalExpenseDivisa += amount || 0;
+                }
+            }
+        }
+
+        return {
+            totalIncomeBase,
+            totalIncomeDivisa,
+            totalExpenseBase,
+            totalExpenseDivisa,
+            totalBalanceBase: totalIncomeBase - totalExpenseBase,
+            totalBalanceDivisa: totalIncomeDivisa - totalExpenseDivisa
+        };
+    },
+
+    /**
+     * Calcular resumen mensual con montos en divisa
+     */
+    calculateMonthlySummaryWithCurrency(reportData, groupBy, defaultCurrency) {
+        if (groupBy !== 'month') {
+            const monthlyData = new Map();
+
+            reportData.forEach(period => {
+                if (period.month && period.year) {
+                    const key = `${period.year}-${period.month}`;
+                    const monthName = period.monthName;
+
+                    if (!monthlyData.has(key)) {
+                        monthlyData.set(key, {
+                            period: monthName,
+                            year: period.year,
+                            month: period.month,
+                            totalIncome: 0,
+                            totalExpense: 0,
+                            totalIncomeDivisa: 0,
+                            totalExpenseDivisa: 0
+                        });
+                    }
+                    const month = monthlyData.get(key);
+                    month.totalIncome += period.totalIncome || 0;
+                    month.totalExpense += period.totalExpense || 0;
+                    month.totalIncomeDivisa += period.incomeByCurrency?.[defaultCurrency] || 0;
+                    month.totalExpenseDivisa += period.expenseByCurrency?.[defaultCurrency] || 0;
+                }
+            });
+
+            return Array.from(monthlyData.values()).sort((a, b) => {
+                if (a.year !== b.year) return a.year - b.year;
+                return a.month - b.month;
+            });
+        }
+
+        return reportData.map(month => ({
+            period: month.monthName,
+            year: month.year,
+            month: month.month,
+            totalIncome: month.totalIncome || 0,
+            totalExpense: month.totalExpense || 0,
+            totalIncomeDivisa: month.incomeByCurrency?.[defaultCurrency] || 0,
+            totalExpenseDivisa: month.expenseByCurrency?.[defaultCurrency] || 0
+        }));
     },
 
     /**
@@ -188,7 +883,7 @@ export const pdfExportService = {
             
             /* Estilos adicionales para nuevas secciones */
             .dual-currency {
-                font-size: 11px;
+                font-size: 16px;
                 color: #6c757d;
             }
             .dual-currency .base {
@@ -236,7 +931,7 @@ export const pdfExportService = {
                 padding: 10px 15px;
                 margin: 20px 0 15px 0;
                 border-radius: 6px;
-                font-size: 14px;
+                font-size: 16px;
             }
             .profit-loss-card {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -247,7 +942,7 @@ export const pdfExportService = {
             }
             .profit-loss-card h4 {
                 margin: 0 0 10px 0;
-                font-size: 14px;
+                font-size: 16px;
             }
             .profit-loss-card .total {
                 font-size: 24px;
@@ -732,7 +1427,7 @@ export const pdfExportService = {
                 padding: 12px 24px; 
                 border-radius: 8px; 
                 cursor: pointer; 
-                font-size: 14px; 
+                font-size: 16px; 
                 font-weight: bold; 
                 z-index: 1000; 
             }
@@ -744,7 +1439,7 @@ export const pdfExportService = {
         /* ✅ Estilos del header fijo */
         .pdf-header {
             display: grid;
-            grid-template-columns: 10% 70% 20%;
+            grid-template-columns: 10% 60% 20%;
             gap: 15px;
             align-items: center;
             padding: 12px 20px;
@@ -759,14 +1454,14 @@ export const pdfExportService = {
         }
         
         .header-logo img {
-            max-width: 70px;
-            max-height: 55px;
+            max-width: 100px;
+            max-height: 85px;
             object-fit: contain;
         }
         
         .default-logo {
-            width: 50px;
-            height: 50px;
+            width: 100px;
+            height: 100px;
             background: linear-gradient(135deg, #007bff, #0056b3);
             border-radius: 50%;
             display: inline-flex;
@@ -783,7 +1478,7 @@ export const pdfExportService = {
         }
         
         .header-company h1 {
-            font-size: 18px;
+            font-size: 16px;
             margin: 0 0 5px 0;
             color: #007bff;
         }
@@ -819,7 +1514,7 @@ export const pdfExportService = {
         
         .header-dates .report-title {
             font-weight: bold;
-            font-size: 11px;
+            font-size: 16px;
             color: #007bff;
             margin-bottom: 5px;
         }
@@ -831,22 +1526,22 @@ export const pdfExportService = {
         .card-danger { background: #dc3545; }
         .card-primary { background: #007bff; }
         .card-warning { background: #ffc107; color: #333; }
-        .card-title { font-size: 11px; opacity: 0.9; margin-bottom: 8px; text-transform: uppercase; }
-        .card-value { font-size: 20px; font-weight: bold; }
+        .card-title { font-size: 16px; opacity: 0.9; margin-bottom: 8px; text-transform: uppercase; }
+        .card-value { font-size: 16px; font-weight: bold; }
         .chart-container { margin-bottom: 30px; padding: 15px; background: #f8f9fa; border-radius: 8px; }
-        .chart-container h3 { margin-bottom: 15px; color: #333; font-size: 14px; }
+        .chart-container h3 { margin-bottom: 15px; color: #333; font-size: 16px; }
         .period-section { margin-bottom: 30px; border: 1px solid #dee2e6; border-radius: 8px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
         .period-header { background: #343a40; color: white; padding: 12px 15px; }
         .period-header h2 { margin: 0 0 5px; font-size: 16px; }
-        .period-summary { font-size: 11px; opacity: 0.8; }
+        .period-summary { font-size: 16px; opacity: 0.8; }
         .period-content { display: flex; flex-wrap: wrap; }
         .income-section, .expense-section { flex: 1; min-width: 250px; padding: 15px; }
         .income-section { border-right: 1px solid #dee2e6; }
         .expense-section { border-left: 1px solid #dee2e6; }
-        .income-title { color: #28a745; font-size: 14px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 2px solid #28a745; }
-        .expense-title { color: #dc3545; font-size: 14px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 2px solid #dc3545; }
+        .income-title { color: #28a745; font-size: 16px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 2px solid #28a745; }
+        .expense-title { color: #dc3545; font-size: 16px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 2px solid #dc3545; }
         .category-group { margin-bottom: 12px; }
-        .category-header { background: #f8f9fa; padding: 6px 10px; border-radius: 4px; display: flex; justify-content: space-between; font-size: 11px; }
+        .category-header { background: #f8f9fa; padding: 6px 10px; border-radius: 4px; display: flex; justify-content: space-between; font-size: 16px; }
         .percent-badge { background: #e9ecef; padding: 2px 6px; border-radius: 10px; font-size: 9px; margin-left: 5px; }
         .category-accounts { padding-left: 15px; margin-top: 5px; }
         .account-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 10px; border-bottom: 1px dashed #e9ecef; }
@@ -1053,20 +1748,20 @@ export const pdfExportService = {
             @media screen {
                 body { margin: 0; padding: 20px; background: #f0f2f5; }
                 .report-container { max-width: 1200px; margin: 0 auto; background: white; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
-                .print-button { position: fixed; bottom: 20px; right: 20px; background: ${theme.primary}; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold; box-shadow: 0 2px 10px rgba(0,0,0,0.2); z-index: 1000; }
+                .print-button { position: fixed; bottom: 20px; right: 20px; background: ${theme.primary}; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; box-shadow: 0 2px 10px rgba(0,0,0,0.2); z-index: 1000; }
                 .print-button:hover { background: ${theme.primaryDark}; }
             }
             body { font-family: 'Segoe UI', Arial, Helvetica, sans-serif; font-size: 12px; line-height: 1.4; }
             .report-container { background: white; padding: 20px; }
             .header { text-align: center; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 3px solid ${theme.primary}; }
             .header h1 { color: ${theme.primary}; font-size: 24px; margin: 0 0 8px 0; }
-            .header .subtitle { color: #6c757d; font-size: 11px; }
-            .filters-info { background: #f8f9fa; padding: 12px; margin-bottom: 20px; border-radius: 6px; border-left: 4px solid ${theme.primary}; font-size: 11px; }
+            .header .subtitle { color: #6c757d; font-size: 16px; }
+            .filters-info { background: #f8f9fa; padding: 12px; margin-bottom: 20px; border-radius: 6px; border-left: 4px solid ${theme.primary}; font-size: 16px; }
             .filters-info strong { color: ${theme.primary}; }
             .alert-info { background: ${theme.primaryLight}; padding: 15px; border-radius: 6px; text-align: center; margin: 20px 0; }
             .charts-dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-bottom: 30px; break-inside: avoid; page-break-inside: avoid; }
             .chart-card { background: white; border: 1px solid #e9ecef; border-radius: 8px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-            .chart-card h4 { color: #495057; font-size: 14px; margin-bottom: 15px; text-align: center; padding-bottom: 8px; border-bottom: 2px solid ${theme.primary}; }
+            .chart-card h4 { color: #495057; font-size: 16px; margin-bottom: 15px; text-align: center; padding-bottom: 8px; border-bottom: 2px solid ${theme.primary}; }
             .chart-container { position: relative; height: 300px; }
             canvas { max-height: 280px; width: 100%; }
             .company-section { margin-bottom: 35px; break-inside: avoid; page-break-inside: avoid; border: 1px solid #dee2e6; border-radius: 8px; overflow: hidden; }
@@ -1076,7 +1771,7 @@ export const pdfExportService = {
             .period-section { margin: 0; border-bottom: 1px solid #e9ecef; }
             .period-section:last-child { border-bottom: none; }
             .period-title { background: #f8f9fa; padding: 10px 15px; border-left: 4px solid ${theme.primary}; margin: 0; }
-            .period-title h3 { margin: 0; font-size: 14px; color: #495057; }
+            .period-title h3 { margin: 0; font-size: 16px; color: #495057; }
             .period-total { font-size: 12px; font-weight: bold; margin: 8px 15px 12px 15px; color: ${theme.primary}; text-align: right; }
             .group-section { margin-bottom: 30px; break-inside: avoid; page-break-inside: avoid; }
             .group-title { background: ${theme.primary}; color: white; padding: 10px 15px; margin: 20px 0 10px 0; border-radius: 6px; }
@@ -1172,7 +1867,7 @@ export const pdfExportService = {
                 </div>
                 <div class="group-total">
                     💰 Total del período: ${this.formatCurrency(group.total)}
-                    <span style="margin-left: 15px; font-size: 11px; color: #6c757d;">
+                    <span style="margin-left: 15px; font-size: 16px; color: #6c757d;">
                         (${group.items.length} transacciones)
                     </span>
                 </div>
@@ -1296,8 +1991,6 @@ export const pdfExportService = {
             </table>
         `;
     },
-
-    // pdfExportService.js - Agregar este método
 
     /**
      * Calcular resumen mensual de ingresos y egresos

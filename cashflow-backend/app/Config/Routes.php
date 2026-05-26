@@ -761,6 +761,13 @@ return [
         'action' => 'destroy',
         'middleware' => ['AuthMiddleware']
     ],
+    [
+        'method' => 'GET',
+        'pattern' => '#^api/exchange-rates/latest$#',
+        'controller' => 'App\\Controllers\\ExchangeRateController',
+        'action' => 'getLatest',
+        'middleware' => ['AuthMiddleware']
+    ],
 
     // ============================================
     // RUTAS DE CARGA MASIVA (CONCILIACIÓN)

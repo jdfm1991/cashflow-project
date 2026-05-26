@@ -4,6 +4,36 @@ import { accountService } from './accountService.js';
 import { companyService } from './companyService.js';
 import { formatCurrency, formatDate } from '../utils/helpers.js';
 
+// services/reportService.js - Agregar al inicio del archivo
+
+/**
+ * Normalizar una fecha para evitar problemas de zona horaria
+ * @param {string} dateString - Fecha en formato YYYY-MM-DD
+ * @returns {Date} - Fecha normalizada (mediodía UTC)
+ */
+function normalizeDate(dateString) {
+    if (!dateString) return null;
+    const [year, month, day] = dateString.split('-');
+    // Crear fecha al mediodía UTC para evitar desplazamiento
+    return new Date(Date.UTC(parseInt(year), parseInt(month) - 1, parseInt(day), 12, 0, 0));
+}
+
+/**
+ * Obtener año de una fecha normalizada
+ */
+function getYearFromDate(dateString) {
+    const [year] = dateString.split('-');
+    return parseInt(year);
+}
+
+/**
+ * Obtener mes de una fecha normalizada (1-12)
+ */
+function getMonthFromDate(dateString) {
+    const [_, month] = dateString.split('-');
+    return parseInt(month);
+}
+
 
 export const reportService = {
     accounts: [],
@@ -121,7 +151,9 @@ export const reportService = {
         const years = {};
 
         incomes.forEach(income => {
-            const year = new Date(income.date).getFullYear();
+            // ✅ Usar año directamente de la cadena (sin conversión de fecha)
+            const year = getYearFromDate(income.date);
+
             if (!years[year]) {
                 years[year] = {
                     year: year,
@@ -129,21 +161,39 @@ export const reportService = {
                     expenses: [],
                     incomeByAccount: {},
                     expenseByAccount: {},
+                    incomeByCurrency: {},
+                    expenseByCurrency: {},
                     totalIncome: 0,
-                    totalExpense: 0
+                    totalExpense: 0,
+                    totalIncomeDivisa: 0,
+                    totalExpenseDivisa: 0
                 };
             }
-            years[year].incomes.push(income);
-            years[year].totalIncome += parseFloat(income.amount_base_currency || income.amount);
-            const accountName = income.account_name || 'Sin cuenta';
-            if (!years[year].incomeByAccount[accountName]) {
-                years[year].incomeByAccount[accountName] = 0;
+            const yearData = years[year];
+
+            const amountBase = parseFloat(income.amount_base_currency || income.amount);
+            const amountDivisa = parseFloat(income.amount);
+            const currencyCode = income.currency_code || 'USD';
+
+            yearData.totalIncome += amountBase;
+            yearData.incomes.push(income);
+
+            if (!yearData.incomeByCurrency[currencyCode]) {
+                yearData.incomeByCurrency[currencyCode] = 0;
             }
-            years[year].incomeByAccount[accountName] += parseFloat(income.amount_base_currency || income.amount);
+            yearData.incomeByCurrency[currencyCode] += amountDivisa;
+
+            const accountName = income.account_name || 'Sin cuenta';
+            if (!yearData.incomeByAccount[accountName]) {
+                yearData.incomeByAccount[accountName] = 0;
+            }
+            yearData.incomeByAccount[accountName] += amountBase;
         });
 
         expenses.forEach(expense => {
-            const year = new Date(expense.date).getFullYear();
+            // ✅ Usar año directamente de la cadena
+            const year = getYearFromDate(expense.date);
+
             if (!years[year]) {
                 years[year] = {
                     year: year,
@@ -151,18 +201,40 @@ export const reportService = {
                     expenses: [],
                     incomeByAccount: {},
                     expenseByAccount: {},
+                    incomeByCurrency: {},
+                    expenseByCurrency: {},
                     totalIncome: 0,
-                    totalExpense: 0
+                    totalExpense: 0,
+                    totalIncomeDivisa: 0,
+                    totalExpenseDivisa: 0
                 };
             }
-            years[year].expenses.push(expense);
-            years[year].totalExpense += parseFloat(expense.amount_base_currency || expense.amount);
-            const accountName = expense.account_name || 'Sin cuenta';
-            if (!years[year].expenseByAccount[accountName]) {
-                years[year].expenseByAccount[accountName] = 0;
+            const yearData = years[year];
+
+            const amountBase = parseFloat(expense.amount_base_currency || expense.amount);
+            const amountDivisa = parseFloat(expense.amount);
+            const currencyCode = expense.currency_code || 'USD';
+
+            yearData.totalExpense += amountBase;
+            yearData.expenses.push(expense);
+
+            if (!yearData.expenseByCurrency[currencyCode]) {
+                yearData.expenseByCurrency[currencyCode] = 0;
             }
-            years[year].expenseByAccount[accountName] += parseFloat(expense.amount_base_currency || expense.amount);
+            yearData.expenseByCurrency[currencyCode] += amountDivisa;
+
+            const accountName = expense.account_name || 'Sin cuenta';
+            if (!yearData.expenseByAccount[accountName]) {
+                yearData.expenseByAccount[accountName] = 0;
+            }
+            yearData.expenseByAccount[accountName] += amountBase;
         });
+
+        const defaultCurrency = 'USD';
+        for (const key in years) {
+            years[key].totalIncomeDivisa = years[key].incomeByCurrency[defaultCurrency] || 0;
+            years[key].totalExpenseDivisa = years[key].expenseByCurrency[defaultCurrency] || 0;
+        }
 
         return Object.values(years).sort((a, b) => a.year - b.year);
     },
@@ -172,65 +244,134 @@ export const reportService = {
      */
     groupByMonth(incomes, expenses, startDate, endDate) {
         const months = {};
-        const start = new Date(startDate);
-        const end = new Date(endDate);
 
-        start.setDate(1);
-        start.setHours(0, 0, 0, 0);
+        // ✅ Parsear fechas de inicio y fin directamente
+        const [startYear, startMonth, startDay] = startDate.split('-');
+        const [endYear, endMonth, endDay] = endDate.split('-');
 
-        const endClone = new Date(end);
-        endClone.setDate(1);
-        endClone.setMonth(endClone.getMonth() + 1);
-        endClone.setDate(0);
-        endClone.setHours(23, 59, 59, 999);
+        const startYearNum = parseInt(startYear);
+        const startMonthNum = parseInt(startMonth);
+        const endYearNum = parseInt(endYear);
+        const endMonthNum = parseInt(endMonth);
 
-        const current = new Date(start);
-        while (current <= endClone) {
-            const year = current.getFullYear();
-            const month = current.getMonth() + 1;
-            const key = `${year}-${month}`;
+        // ✅ Generar todos los meses en el rango
+        let currentYear = startYearNum;
+        let currentMonth = startMonthNum;
+
+        while (currentYear < endYearNum || (currentYear === endYearNum && currentMonth <= endMonthNum)) {
+            const key = `${currentYear}-${currentMonth}`;
+            const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
             months[key] = {
-                year: year,
-                month: month,
-                monthName: current.toLocaleString('es', { month: 'long' }),
+                year: currentYear,
+                month: currentMonth,
+                monthName: monthNames[currentMonth - 1],
                 incomes: [],
                 expenses: [],
                 incomeByAccount: {},
                 expenseByAccount: {},
+                incomeByCurrency: {},
+                expenseByCurrency: {},
+                incomeByCurrencyDetails: {},
+                expenseByCurrencyDetails: {},
                 totalIncome: 0,
                 totalExpense: 0,
-                sortKey: current.getTime()
+                totalIncomeDivisa: 0,
+                totalExpenseDivisa: 0,
+                sortKey: currentYear * 12 + currentMonth
             };
-            current.setMonth(current.getMonth() + 1);
+
+            // Avanzar al siguiente mes
+            currentMonth++;
+            if (currentMonth > 12) {
+                currentMonth = 1;
+                currentYear++;
+            }
         }
 
+        // Procesar ingresos
         incomes.forEach(income => {
-            const date = new Date(income.date);
-            const key = `${date.getFullYear()}-${date.getMonth() + 1}`;
+            // ✅ Extraer año y mes directamente de la cadena
+            const [incomeYear, incomeMonth] = income.date.split('-');
+            const key = `${parseInt(incomeYear)}-${parseInt(incomeMonth)}`;
+
             if (months[key]) {
-                months[key].incomes.push(income);
-                months[key].totalIncome += parseFloat(income.amount_base_currency || income.amount);
-                const accountName = income.account_name || 'Sin cuenta';
-                if (!months[key].incomeByAccount[accountName]) {
-                    months[key].incomeByAccount[accountName] = 0;
+                const month = months[key];
+                month.incomes.push(income);
+
+                const amountBase = parseFloat(income.amount_base_currency || income.amount);
+                const amountDivisa = parseFloat(income.amount);
+                const currencyCode = income.currency_code || 'USD';
+
+                month.totalIncome += amountBase;
+
+                if (!month.incomeByCurrency[currencyCode]) {
+                    month.incomeByCurrency[currencyCode] = 0;
                 }
-                months[key].incomeByAccount[accountName] += parseFloat(income.amount_base_currency || income.amount);
+                month.incomeByCurrency[currencyCode] += amountDivisa;
+
+                const accountName = income.account_name || 'Sin cuenta';
+                if (!month.incomeByAccount[accountName]) {
+                    month.incomeByAccount[accountName] = 0;
+                }
+                month.incomeByAccount[accountName] += amountBase;
+
+                // ✅ Detalle por cuenta y moneda
+                if (!month.incomeByCurrencyDetails[accountName]) {
+                    month.incomeByCurrencyDetails[accountName] = {};
+                }
+                if (!month.incomeByCurrencyDetails[accountName][currencyCode]) {
+                    month.incomeByCurrencyDetails[accountName][currencyCode] = 0;
+                }
+                month.incomeByCurrencyDetails[accountName][currencyCode] += amountDivisa;
             }
         });
 
+        // Procesar egresos
         expenses.forEach(expense => {
-            const date = new Date(expense.date);
-            const key = `${date.getFullYear()}-${date.getMonth() + 1}`;
+            // ✅ Extraer año y mes directamente de la cadena
+            const [expenseYear, expenseMonth] = expense.date.split('-');
+            const key = `${parseInt(expenseYear)}-${parseInt(expenseMonth)}`;
+
             if (months[key]) {
-                months[key].expenses.push(expense);
-                months[key].totalExpense += parseFloat(expense.amount_base_currency || expense.amount);
-                const accountName = expense.account_name || 'Sin cuenta';
-                if (!months[key].expenseByAccount[accountName]) {
-                    months[key].expenseByAccount[accountName] = 0;
+                const month = months[key];
+                month.expenses.push(expense);
+
+                const amountBase = parseFloat(expense.amount_base_currency || expense.amount);
+                const amountDivisa = parseFloat(expense.amount);
+                const currencyCode = expense.currency_code || 'USD';
+
+                month.totalExpense += amountBase;
+
+                if (!month.expenseByCurrency[currencyCode]) {
+                    month.expenseByCurrency[currencyCode] = 0;
                 }
-                months[key].expenseByAccount[accountName] += parseFloat(expense.amount_base_currency || expense.amount);
+                month.expenseByCurrency[currencyCode] += amountDivisa;
+
+                const accountName = expense.account_name || 'Sin cuenta';
+                if (!month.expenseByAccount[accountName]) {
+                    month.expenseByAccount[accountName] = 0;
+                }
+                month.expenseByAccount[accountName] += amountBase;
+
+                // ✅ Detalle por cuenta y moneda
+                if (!month.expenseByCurrencyDetails[accountName]) {
+                    month.expenseByCurrencyDetails[accountName] = {};
+                }
+                if (!month.expenseByCurrencyDetails[accountName][currencyCode]) {
+                    month.expenseByCurrencyDetails[accountName][currencyCode] = 0;
+                }
+                month.expenseByCurrencyDetails[accountName][currencyCode] += amountDivisa;
             }
         });
+
+        // Calcular totales en divisa por defecto
+        const defaultCurrency = 'USD';
+        for (const key in months) {
+            months[key].totalIncomeDivisa = months[key].incomeByCurrency[defaultCurrency] || 0;
+            months[key].totalExpenseDivisa = months[key].expenseByCurrency[defaultCurrency] || 0;
+        }
 
         return Object.values(months).sort((a, b) => a.sortKey - b.sortKey);
     },
@@ -240,73 +381,116 @@ export const reportService = {
      */
     groupByQuarter(incomes, expenses, startDate, endDate) {
         const quarters = {};
-        const start = new Date(startDate);
-        const end = new Date(endDate);
 
-        const startQuarter = Math.floor(start.getMonth() / 3);
-        start.setMonth(startQuarter * 3);
-        start.setDate(1);
-        start.setHours(0, 0, 0, 0);
+        // ✅ Parsear fechas directamente
+        const [startYear, startMonth] = startDate.split('-');
+        const [endYear, endMonth] = endDate.split('-');
 
-        const endClone = new Date(end);
-        const endQuarter = Math.floor(endClone.getMonth() / 3);
-        endClone.setMonth((endQuarter * 3) + 2);
-        endClone.setDate(1);
-        endClone.setMonth(endClone.getMonth() + 1);
-        endClone.setDate(0);
-        endClone.setHours(23, 59, 59, 999);
+        const startYearNum = parseInt(startYear);
+        const startMonthNum = parseInt(startMonth);
+        const endYearNum = parseInt(endYear);
+        const endMonthNum = parseInt(endMonth);
 
-        const current = new Date(start);
-        while (current <= endClone) {
-            const year = current.getFullYear();
-            const quarter = Math.floor(current.getMonth() / 3) + 1;
-            const key = `${year}-Q${quarter}`;
-            if (!quarters[key]) {
-                quarters[key] = {
-                    year: year,
-                    quarter: quarter,
-                    quarterName: `${quarter}° Trimestre`,
-                    incomes: [],
-                    expenses: [],
-                    incomeByAccount: {},
-                    expenseByAccount: {},
-                    totalIncome: 0,
-                    totalExpense: 0,
-                    sortKey: current.getTime()
-                };
+        // Calcular trimestre de inicio
+        let startQuarter = Math.floor((startMonthNum - 1) / 3) + 1;
+        let currentYear = startYearNum;
+        let currentQuarter = startQuarter;
+
+        while (currentYear < endYearNum || (currentYear === endYearNum && currentQuarter <= Math.floor((endMonthNum - 1) / 3) + 1)) {
+            const key = `${currentYear}-Q${currentQuarter}`;
+            const quarterNames = { 1: '1er Trimestre', 2: '2do Trimestre', 3: '3er Trimestre', 4: '4to Trimestre' };
+
+            quarters[key] = {
+                year: currentYear,
+                quarter: currentQuarter,
+                quarterName: quarterNames[currentQuarter],
+                incomes: [],
+                expenses: [],
+                incomeByAccount: {},
+                expenseByAccount: {},
+                incomeByCurrency: {},
+                expenseByCurrency: {},
+                totalIncome: 0,
+                totalExpense: 0,
+                totalIncomeDivisa: 0,
+                totalExpenseDivisa: 0,
+                sortKey: currentYear * 4 + currentQuarter
+            };
+
+            currentQuarter++;
+            if (currentQuarter > 4) {
+                currentQuarter = 1;
+                currentYear++;
             }
-            current.setMonth(current.getMonth() + 3);
         }
 
+        // Procesar ingresos
         incomes.forEach(income => {
-            const date = new Date(income.date);
-            const quarter = Math.floor(date.getMonth() / 3) + 1;
-            const key = `${date.getFullYear()}-Q${quarter}`;
+            const [incomeYear, incomeMonth] = income.date.split('-');
+            const year = parseInt(incomeYear);
+            const month = parseInt(incomeMonth);
+            const quarter = Math.floor((month - 1) / 3) + 1;
+            const key = `${year}-Q${quarter}`;
+
             if (quarters[key]) {
-                quarters[key].incomes.push(income);
-                quarters[key].totalIncome += parseFloat(income.amount_base_currency || income.amount);
-                const accountName = income.account_name || 'Sin cuenta';
-                if (!quarters[key].incomeByAccount[accountName]) {
-                    quarters[key].incomeByAccount[accountName] = 0;
+                const quarterData = quarters[key];
+
+                const amountBase = parseFloat(income.amount_base_currency || income.amount);
+                const amountDivisa = parseFloat(income.amount);
+                const currencyCode = income.currency_code || 'USD';
+
+                quarterData.totalIncome += amountBase;
+                quarterData.incomes.push(income);
+
+                if (!quarterData.incomeByCurrency[currencyCode]) {
+                    quarterData.incomeByCurrency[currencyCode] = 0;
                 }
-                quarters[key].incomeByAccount[accountName] += parseFloat(income.amount_base_currency || income.amount);
+                quarterData.incomeByCurrency[currencyCode] += amountDivisa;
+
+                const accountName = income.account_name || 'Sin cuenta';
+                if (!quarterData.incomeByAccount[accountName]) {
+                    quarterData.incomeByAccount[accountName] = 0;
+                }
+                quarterData.incomeByAccount[accountName] += amountBase;
             }
         });
 
+        // Procesar egresos
         expenses.forEach(expense => {
-            const date = new Date(expense.date);
-            const quarter = Math.floor(date.getMonth() / 3) + 1;
-            const key = `${date.getFullYear()}-Q${quarter}`;
+            const [expenseYear, expenseMonth] = expense.date.split('-');
+            const year = parseInt(expenseYear);
+            const month = parseInt(expenseMonth);
+            const quarter = Math.floor((month - 1) / 3) + 1;
+            const key = `${year}-Q${quarter}`;
+
             if (quarters[key]) {
-                quarters[key].expenses.push(expense);
-                quarters[key].totalExpense += parseFloat(expense.amount_base_currency || expense.amount);
-                const accountName = expense.account_name || 'Sin cuenta';
-                if (!quarters[key].expenseByAccount[accountName]) {
-                    quarters[key].expenseByAccount[accountName] = 0;
+                const quarterData = quarters[key];
+
+                const amountBase = parseFloat(expense.amount_base_currency || expense.amount);
+                const amountDivisa = parseFloat(expense.amount);
+                const currencyCode = expense.currency_code || 'USD';
+
+                quarterData.totalExpense += amountBase;
+                quarterData.expenses.push(expense);
+
+                if (!quarterData.expenseByCurrency[currencyCode]) {
+                    quarterData.expenseByCurrency[currencyCode] = 0;
                 }
-                quarters[key].expenseByAccount[accountName] += parseFloat(expense.amount_base_currency || expense.amount);
+                quarterData.expenseByCurrency[currencyCode] += amountDivisa;
+
+                const accountName = expense.account_name || 'Sin cuenta';
+                if (!quarterData.expenseByAccount[accountName]) {
+                    quarterData.expenseByAccount[accountName] = 0;
+                }
+                quarterData.expenseByAccount[accountName] += amountBase;
             }
         });
+
+        const defaultCurrency = 'USD';
+        for (const key in quarters) {
+            quarters[key].totalIncomeDivisa = quarters[key].incomeByCurrency[defaultCurrency] || 0;
+            quarters[key].totalExpenseDivisa = quarters[key].expenseByCurrency[defaultCurrency] || 0;
+        }
 
         return Object.values(quarters).sort((a, b) => a.sortKey - b.sortKey);
     },
@@ -385,5 +569,5 @@ export const reportService = {
             'quarter': 'Trimestre'
         };
         return texts[groupBy] || groupBy;
-    }
+    },
 };
