@@ -229,7 +229,7 @@ export const pdfExportService = {
                 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
                 <style>
                     * { margin: 0; padding: 0; box-sizing: border-box; }
-                    
+    
                     @media print {
                         body { margin: 0; padding: 0; }
                         .no-print { display: none; }
@@ -263,7 +263,7 @@ export const pdfExportService = {
                         .print-button:hover { background: #0056b3; }
                     }
                     
-                    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; line-height: 1.4; }
+                    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; line-height: 1.5; }
                     
                     /* Header - solo en primera página */
                     .pdf-header {
@@ -271,10 +271,10 @@ export const pdfExportService = {
                         grid-template-columns: 10% 60% 20%;
                         gap: 15px;
                         align-items: center;
-                        padding: 12px 20px;
+                        padding: 15px 25px;
                         background: white;
                         border-bottom: 3px solid #007bff;
-                        margin-bottom: 20px;
+                        margin-bottom: 25px;
                     }
                     
                     .header-logo { text-align: center; padding: 5px; }
@@ -293,14 +293,14 @@ export const pdfExportService = {
                     }
                     
                     .header-company { text-align: left; }
-                    .header-company h1 { font-size: 16px; margin: 0 0 5px 0; color: #007bff; }
+                    .header-company h1 { font-size: 18px; margin: 0 0 5px 0; color: #007bff; }
                     .header-company .company-name { font-size: 13px; font-weight: bold; margin: 0; color: #333; }
                     .header-company .business-name { font-size: 10px; color: #6c757d; margin: 3px 0; }
                     .header-company .tax-id { font-size: 10px; color: #6c757d; margin: 2px 0; }
                     
                     .header-dates { text-align: right; font-size: 10px; color: #495057; }
                     .header-dates p { margin: 3px 0; }
-                    .header-dates .report-title { font-weight: bold; font-size: 16px; color: #007bff; margin-bottom: 5px; }
+                    .header-dates .report-title { font-weight: bold; font-size: 18px; color: #007bff; margin-bottom: 5px; }
                     
                     /* Tarjetas de resumen */
                     .summary-cards { display: flex; gap: 15px; margin-bottom: 30px; flex-wrap: wrap; }
@@ -311,11 +311,11 @@ export const pdfExportService = {
                     .card-warning { background: #ffc107; color: #333; }
                     .card-title { font-size: 12px; opacity: 0.9; margin-bottom: 8px; text-transform: uppercase; }
                     .card-value { font-size: 22px; font-weight: bold; }
-                    .dual-currency { font-size: 16px; color: rgba(255,255,255,0.9); margin-top: 8px; }
+                    .dual-currency { font-size: 18px; color: rgba(255,255,255,0.9); margin-top: 8px; }
                     
                     /* Gráficas */
                     .chart-container { margin-bottom: 30px; padding: 15px; background: #f8f9fa; border-radius: 8px; }
-                    .chart-container h3 { margin-bottom: 15px; color: #333; font-size: 16px; }
+                    .chart-container h3 { margin-bottom: 15px; color: #333; font-size: 18px; }
                     
                     /* Tablas */
                     .section-title {
@@ -324,14 +324,14 @@ export const pdfExportService = {
                         padding: 10px 15px;
                         margin: 25px 0 15px 0;
                         border-radius: 6px;
-                        font-size: 16px;
+                        font-size: 18px;
                     }
                     
                     .summary-table {
                         width: 100%;
                         border-collapse: collapse;
                         margin: 15px 0 20px 0;
-                        font-size: 16px;
+                        font-size: 18px;
                     }
                     .summary-table th, .summary-table td {
                         padding: 10px 8px;
@@ -348,52 +348,92 @@ export const pdfExportService = {
                     .summary-table tfoot td { background: #e9ecef; font-weight: bold; }
                     
                     /* Períodos */
-                    .period-section { margin-bottom: 30px; border: 1px solid #dee2e6; border-radius: 8px; overflow: hidden; break-inside: avoid; }
-                    .period-header { background: #343a40; color: white; padding: 12px 15px; }
-                    .period-header h2 { margin: 0 0 5px; font-size: 16px; }
-                    .period-summary { font-size: 16px; opacity: 0.8; }
+                    .period-section { 
+                        margin-bottom: 30px; 
+                        border: 1px solid #dee2e6; 
+                        border-radius: 8px; 
+                        overflow: hidden; 
+                        break-inside: avoid; 
+                    }
+                    .period-header { 
+                        background: #343a40; 
+                        color: white; 
+                        padding: 15px 20px;  /* Aumentado */
+                    }
+                    .period-header h2 { 
+                        margin: 0 0 5px; 
+                        font-size: 20px;  /* Aumentado de 16px */
+                    }
+                    .period-summary { 
+                        font-size: 15px;  /* Aumentado */
+                        opacity: 0.9; 
+                    }
                     .period-content { display: flex; flex-wrap: wrap; }
-                    .income-section, .expense-section { flex: 1; min-width: 280px; padding: 15px; }
+                    .income-section, .expense-section { 
+                        flex: 1; 
+                        min-width: 300px; 
+                        padding: 20px 25px;  /* Aumentado */
+                    }
                     .income-section { border-right: 1px solid #dee2e6; }
                     .expense-section { border-left: 1px solid #dee2e6; }
-                    .income-title { color: #28a745; font-size: 16px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 2px solid #28a745; font-weight: bold; }
-                    .expense-title { color: #dc3545; font-size: 16px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 2px solid #dc3545; font-weight: bold; }
+                    .income-title { 
+                        color: #28a745; 
+                        font-size: 20px;  /* Aumentado de 16px */
+                        margin-bottom: 15px; 
+                        padding-bottom: 8px; 
+                        border-bottom: 3px solid #28a745; 
+                        font-weight: bold; 
+                    }
+                    .expense-title { 
+                        color: #dc3545; 
+                        font-size: 20px;  /* Aumentado de 16px */
+                        margin-bottom: 15px; 
+                        padding-bottom: 8px; 
+                        border-bottom: 3px solid #dc3545; 
+                        font-weight: bold; 
+                    }
                     
                     /* Categorías y cuentas */
-                    .category-group { margin-bottom: 15px; }
+                    .category-group { 
+                        margin-bottom: 18px;  /* Aumentado */
+                    }
                     .category-header { 
                         background: #f8f9fa; 
-                        padding: 8px 12px; 
-                        border-radius: 6px; 
+                        padding: 12px 16px;  /* Aumentado */
+                        border-radius: 8px; 
                         display: flex; 
                         justify-content: space-between; 
-                        font-size: 13px;
+                        font-size: 16px;  /* Aumentado de 13px */
                         font-weight: bold;
+                        border-left: 4px solid #007bff;
                     }
                     .percent-badge { 
                         background: #e9ecef; 
                         padding: 2px 8px; 
                         border-radius: 12px; 
-                        font-size: 16px; 
+                        font-size: 18px; 
                         margin-left: 8px; 
                         font-weight: normal;
                     }
-                    .category-accounts { padding-left: 20px; margin-top: 8px; }
+                    .category-accounts { 
+                        padding-left: 25px;  /* Aumentado */
+                        margin-top: 10px; 
+                    }
                     .account-row { 
                         display: flex; 
                         justify-content: space-between; 
-                        padding: 6px 0; 
-                        font-size: 12px; 
+                        padding: 8px 0;  /* Aumentado */
+                        font-size: 14px;  /* Aumentado de 12px */
                         border-bottom: 1px dashed #e9ecef;
                     }
                     .account-row span:first-child { color: #495057; }
                     .account-row span:last-child { font-weight: 500; }
                     .section-total { 
-                        margin-top: 15px; 
-                        padding-top: 10px; 
+                        margin-top: 18px; 
+                        padding-top: 12px; 
                         text-align: right; 
                         font-weight: bold; 
-                        font-size: 13px; 
+                        font-size: 16px;  /* Aumentado de 13px */
                         border-top: 2px solid #dee2e6;
                     }
                     .empty-message { text-align: center; color: #6c757d; padding: 20px; font-style: italic; font-size: 12px; }
@@ -403,18 +443,19 @@ export const pdfExportService = {
                         width: 100%;
                         border-collapse: collapse;
                         margin-top: 10px;
-                        font-size: 16px;
+                        font-size: 14px;  /* Aumentado */
                     }
                     .bank-balances-table th {
                         background: #007bff;
                         color: white;
-                        padding: 10px;
+                        padding: 12px;  /* Aumentado */
                         text-align: left;
-                        font-size: 16px;
+                        font-size: 14px;
                     }
                     .bank-balances-table td {
-                        padding: 8px;
+                        padding: 10px;  /* Aumentado */
                         border-bottom: 1px solid #dee2e6;
+                        font-size: 14px;
                     }
                     .bank-balances-table td.text-right { text-align: right; }
                     
@@ -883,7 +924,7 @@ export const pdfExportService = {
             
             /* Estilos adicionales para nuevas secciones */
             .dual-currency {
-                font-size: 16px;
+                font-size: 18px;
                 color: #6c757d;
             }
             .dual-currency .base {
@@ -931,7 +972,7 @@ export const pdfExportService = {
                 padding: 10px 15px;
                 margin: 20px 0 15px 0;
                 border-radius: 6px;
-                font-size: 16px;
+                font-size: 18px;
             }
             .profit-loss-card {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -942,7 +983,7 @@ export const pdfExportService = {
             }
             .profit-loss-card h4 {
                 margin: 0 0 10px 0;
-                font-size: 16px;
+                font-size: 18px;
             }
             .profit-loss-card .total {
                 font-size: 24px;
@@ -1427,7 +1468,7 @@ export const pdfExportService = {
                 padding: 12px 24px; 
                 border-radius: 8px; 
                 cursor: pointer; 
-                font-size: 16px; 
+                font-size: 18px; 
                 font-weight: bold; 
                 z-index: 1000; 
             }
@@ -1478,7 +1519,7 @@ export const pdfExportService = {
         }
         
         .header-company h1 {
-            font-size: 16px;
+            font-size: 18px;
             margin: 0 0 5px 0;
             color: #007bff;
         }
@@ -1514,7 +1555,7 @@ export const pdfExportService = {
         
         .header-dates .report-title {
             font-weight: bold;
-            font-size: 16px;
+            font-size: 18px;
             color: #007bff;
             margin-bottom: 5px;
         }
@@ -1526,22 +1567,22 @@ export const pdfExportService = {
         .card-danger { background: #dc3545; }
         .card-primary { background: #007bff; }
         .card-warning { background: #ffc107; color: #333; }
-        .card-title { font-size: 16px; opacity: 0.9; margin-bottom: 8px; text-transform: uppercase; }
-        .card-value { font-size: 16px; font-weight: bold; }
+        .card-title { font-size: 18px; opacity: 0.9; margin-bottom: 8px; text-transform: uppercase; }
+        .card-value { font-size: 18px; font-weight: bold; }
         .chart-container { margin-bottom: 30px; padding: 15px; background: #f8f9fa; border-radius: 8px; }
-        .chart-container h3 { margin-bottom: 15px; color: #333; font-size: 16px; }
+        .chart-container h3 { margin-bottom: 15px; color: #333; font-size: 18px; }
         .period-section { margin-bottom: 30px; border: 1px solid #dee2e6; border-radius: 8px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
         .period-header { background: #343a40; color: white; padding: 12px 15px; }
-        .period-header h2 { margin: 0 0 5px; font-size: 16px; }
-        .period-summary { font-size: 16px; opacity: 0.8; }
+        .period-header h2 { margin: 0 0 5px; font-size: 18px; }
+        .period-summary { font-size: 18px; opacity: 0.8; }
         .period-content { display: flex; flex-wrap: wrap; }
         .income-section, .expense-section { flex: 1; min-width: 250px; padding: 15px; }
         .income-section { border-right: 1px solid #dee2e6; }
         .expense-section { border-left: 1px solid #dee2e6; }
-        .income-title { color: #28a745; font-size: 16px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 2px solid #28a745; }
-        .expense-title { color: #dc3545; font-size: 16px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 2px solid #dc3545; }
+        .income-title { color: #28a745; font-size: 18px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 2px solid #28a745; }
+        .expense-title { color: #dc3545; font-size: 18px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 2px solid #dc3545; }
         .category-group { margin-bottom: 12px; }
-        .category-header { background: #f8f9fa; padding: 6px 10px; border-radius: 4px; display: flex; justify-content: space-between; font-size: 16px; }
+        .category-header { background: #f8f9fa; padding: 6px 10px; border-radius: 4px; display: flex; justify-content: space-between; font-size: 18px; }
         .percent-badge { background: #e9ecef; padding: 2px 6px; border-radius: 10px; font-size: 9px; margin-left: 5px; }
         .category-accounts { padding-left: 15px; margin-top: 5px; }
         .account-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 10px; border-bottom: 1px dashed #e9ecef; }
@@ -1748,30 +1789,30 @@ export const pdfExportService = {
             @media screen {
                 body { margin: 0; padding: 20px; background: #f0f2f5; }
                 .report-container { max-width: 1200px; margin: 0 auto; background: white; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
-                .print-button { position: fixed; bottom: 20px; right: 20px; background: ${theme.primary}; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; box-shadow: 0 2px 10px rgba(0,0,0,0.2); z-index: 1000; }
+                .print-button { position: fixed; bottom: 20px; right: 20px; background: ${theme.primary}; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 18px; font-weight: bold; box-shadow: 0 2px 10px rgba(0,0,0,0.2); z-index: 1000; }
                 .print-button:hover { background: ${theme.primaryDark}; }
             }
             body { font-family: 'Segoe UI', Arial, Helvetica, sans-serif; font-size: 12px; line-height: 1.4; }
             .report-container { background: white; padding: 20px; }
             .header { text-align: center; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 3px solid ${theme.primary}; }
             .header h1 { color: ${theme.primary}; font-size: 24px; margin: 0 0 8px 0; }
-            .header .subtitle { color: #6c757d; font-size: 16px; }
-            .filters-info { background: #f8f9fa; padding: 12px; margin-bottom: 20px; border-radius: 6px; border-left: 4px solid ${theme.primary}; font-size: 16px; }
+            .header .subtitle { color: #6c757d; font-size: 18px; }
+            .filters-info { background: #f8f9fa; padding: 12px; margin-bottom: 20px; border-radius: 6px; border-left: 4px solid ${theme.primary}; font-size: 18px; }
             .filters-info strong { color: ${theme.primary}; }
             .alert-info { background: ${theme.primaryLight}; padding: 15px; border-radius: 6px; text-align: center; margin: 20px 0; }
             .charts-dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-bottom: 30px; break-inside: avoid; page-break-inside: avoid; }
             .chart-card { background: white; border: 1px solid #e9ecef; border-radius: 8px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-            .chart-card h4 { color: #495057; font-size: 16px; margin-bottom: 15px; text-align: center; padding-bottom: 8px; border-bottom: 2px solid ${theme.primary}; }
+            .chart-card h4 { color: #495057; font-size: 18px; margin-bottom: 15px; text-align: center; padding-bottom: 8px; border-bottom: 2px solid ${theme.primary}; }
             .chart-container { position: relative; height: 300px; }
             canvas { max-height: 280px; width: 100%; }
             .company-section { margin-bottom: 35px; break-inside: avoid; page-break-inside: avoid; border: 1px solid #dee2e6; border-radius: 8px; overflow: hidden; }
             .company-header { background: linear-gradient(135deg, ${theme.primary} 0%, ${theme.primaryDark} 100%); color: white; padding: 12px 15px; }
-            .company-header h2 { margin: 0; font-size: 16px; }
+            .company-header h2 { margin: 0; font-size: 18px; }
             .company-header .company-total { font-size: 13px; margin-top: 5px; opacity: 0.9; }
             .period-section { margin: 0; border-bottom: 1px solid #e9ecef; }
             .period-section:last-child { border-bottom: none; }
             .period-title { background: #f8f9fa; padding: 10px 15px; border-left: 4px solid ${theme.primary}; margin: 0; }
-            .period-title h3 { margin: 0; font-size: 16px; color: #495057; }
+            .period-title h3 { margin: 0; font-size: 18px; color: #495057; }
             .period-total { font-size: 12px; font-weight: bold; margin: 8px 15px 12px 15px; color: ${theme.primary}; text-align: right; }
             .group-section { margin-bottom: 30px; break-inside: avoid; page-break-inside: avoid; }
             .group-title { background: ${theme.primary}; color: white; padding: 10px 15px; margin: 20px 0 10px 0; border-radius: 6px; }
@@ -1782,10 +1823,10 @@ export const pdfExportService = {
             td { padding: 6px; border: 1px solid #dee2e6; }
             tr:nth-child(even) { background: #f8f9fa; }
             .summary { margin-top: 30px; padding: 15px; background: #f8f9fa; border-radius: 6px; break-inside: avoid; page-break-inside: avoid; }
-            .summary h3 { margin: 0 0 15px 0; color: ${theme.primary}; font-size: 16px; }
+            .summary h3 { margin: 0 0 15px 0; color: ${theme.primary}; font-size: 18px; }
             .summary-table { width: 100%; margin-top: 10px; }
             .summary-table th { background: #6c757d; }
-            .total-general { font-size: 16px; font-weight: bold; text-align: right; margin-top: 20px; padding-top: 10px; border-top: 2px solid ${theme.primary}; }
+            .total-general { font-size: 18px; font-weight: bold; text-align: right; margin-top: 20px; padding-top: 10px; border-top: 2px solid ${theme.primary}; }
             .footer { text-align: center; margin-top: 30px; padding-top: 10px; border-top: 1px solid #dee2e6; font-size: 9px; color: #6c757d; }
             .badge { display: inline-block; padding: 2px 6px; font-size: 9px; font-weight: bold; border-radius: 3px; }
             .badge-bank { background: #6c757d; color: white; }
@@ -1867,7 +1908,7 @@ export const pdfExportService = {
                 </div>
                 <div class="group-total">
                     💰 Total del período: ${this.formatCurrency(group.total)}
-                    <span style="margin-left: 15px; font-size: 16px; color: #6c757d;">
+                    <span style="margin-left: 15px; font-size: 18px; color: #6c757d;">
                         (${group.items.length} transacciones)
                     </span>
                 </div>

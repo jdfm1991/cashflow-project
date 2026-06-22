@@ -861,14 +861,16 @@ class MigrationController
                 WHERE company_id = :company_id 
                 AND date = :date 
                 AND amount = :amount
-                AND reference = :reference";
+                AND reference = :reference
+                AND bank_id = :bank_id";
 
         $stmt = $db->prepare($sql);
         $stmt->execute([
             'company_id' => $companyId,
             'date' => $transaction['transaction_date'],
             'amount' => $transaction['amount'],
-            'reference' => $transaction['reference']
+            'reference' => $transaction['reference'],
+            'bank_id' => $transaction['bank_id']
         ]);
         $result = $stmt->fetch();
 
@@ -880,14 +882,16 @@ class MigrationController
                 WHERE company_id = :company_id 
                 AND date = :date 
                 AND amount = :amount
-                AND reference = :reference";
+                AND reference = :reference
+                AND bank_id = :bank_id";
 
         $stmt = $db->prepare($sql);
         $stmt->execute([
             'company_id' => $companyId,
             'date' => $transaction['transaction_date'],
             'amount' => $transaction['amount'],
-            'reference' => $transaction['reference']
+            'reference' => $transaction['reference'],
+            'bank_id' => $transaction['bank_id']
         ]);
         $result = $stmt->fetch();
 

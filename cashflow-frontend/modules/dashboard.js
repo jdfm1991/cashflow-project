@@ -12,10 +12,10 @@ export const dashboardModule = {
         const user = api.getUser();
         const isAuthenticated = api.isAuthenticated();
         const isSuperAdmin = user?.role === 'super_admin';
-        
+
         // Cargar empresas (siempre carga empresas públicas para el selector)
         await this.loadCompanies();
-        
+
         // Si está autenticado y no es super_admin, cargar su empresa específica
         let defaultCompanyId = '';
         if (isAuthenticated && !isSuperAdmin && this.companies.length === 1) {
@@ -49,10 +49,10 @@ export const dashboardModule = {
                             </div>
                             <small class="text-muted mt-2 d-block">
                                 <i class="bi bi-info-circle"></i> 
-                                ${isAuthenticated ? 
-                                    (isSuperAdmin ? 'Como Super Administrador, puedes ver los datos de cualquier empresa.' : 
-                                    'Estás viendo los datos de tu empresa.') : 
-                                    'Modo público - Puedes ver los datos de cualquier empresa sin necesidad de iniciar sesión.'}
+                                ${isAuthenticated ?
+                (isSuperAdmin ? 'Como Super Administrador, puedes ver los datos de cualquier empresa.' :
+                    'Estás viendo los datos de tu empresa.') :
+                'Modo público - Puedes ver los datos de cualquier empresa sin necesidad de iniciar sesión.'}
                             </small>
                         </div>
                     </div>
@@ -140,6 +140,8 @@ export const dashboardModule = {
                 <i class="bi bi-building"></i> Mostrando datos de: <strong id="currentCompanyName"></strong>
             </div>
             
+           // modules/dashboard.js - Modificar la sección de gráficas
+
             <!-- Gráficas -->
             <div class="row mt-4">
                 <div class="col-lg-8">
@@ -153,12 +155,22 @@ export const dashboardModule = {
                     </div>
                 </div>
                 <div class="col-lg-4">
-                    <div class="card shadow">
-                        <div class="card-header">
-                            <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Distribución por Categorías</h5>
+                    <!-- ✅ Gráfica de Ingresos por Categoría -->
+                    <div class="card shadow mb-3">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0"><i class="bi bi-arrow-up-circle"></i> Ingresos por Categoría</h5>
                         </div>
                         <div class="card-body">
-                            <canvas id="categoryChart" height="300"></canvas>
+                            <canvas id="incomeCategoryChart" height="200"></canvas>
+                        </div>
+                    </div>
+                    <!-- ✅ Gráfica de Egresos por Categoría -->
+                    <div class="card shadow">
+                        <div class="card-header bg-danger text-white">
+                            <h5 class="mb-0"><i class="bi bi-arrow-down-circle"></i> Egresos por Categoría</h5>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="expenseCategoryChart" height="200"></canvas>
                         </div>
                     </div>
                 </div>
@@ -234,7 +246,7 @@ export const dashboardModule = {
         `;
 
         this.setupEventListeners();
-        
+
         // Si hay una empresa seleccionada por defecto, cargar datos
         if (defaultCompanyId) {
             setTimeout(() => this.loadData(), 100);
@@ -270,7 +282,7 @@ export const dashboardModule = {
 
     async loadData() {
         const companyId = document.getElementById('companySelect')?.value;
-        
+
         if (!companyId) {
             showAlert('Por favor seleccione una empresa', 'warning');
             return;
@@ -312,10 +324,10 @@ export const dashboardModule = {
                 this.renderCashFlowChart(cashFlowResponse.data);
             }
 
-            // 4. Cargar distribución por categorías
+            // 4. Cargar distribución por categorías (nuevo endpoint)
             const categoryResponse = await api.get(`api/public/dashboard/category-distribution?company_id=${companyId}&start_date=${startDate}&end_date=${endDate}`, false);
             if (categoryResponse.success && categoryResponse.data) {
-                this.renderCategoryChart(categoryResponse.data);
+                this.renderCategoryCharts(categoryResponse.data);
             }
 
             // 5. Cargar transacciones recientes
@@ -335,7 +347,7 @@ export const dashboardModule = {
     updateStats(data) {
         const currentPeriod = data.current_period || {};
         const comparison = data.comparison || {};
-        
+
         const totalIncome = currentPeriod.total_income || 0;
         const totalExpense = currentPeriod.total_expense || 0;
         const balance = currentPeriod.balance || 0;
@@ -545,10 +557,10 @@ export const dashboardModule = {
             totalExpense += p.expense;
             totalNet += p.net_cash_flow;
             lastCumulative = p.cumulative;
-            
+
             const netClass = p.net_cash_flow >= 0 ? 'text-success' : 'text-danger';
             const cumulativeClass = p.cumulative >= 0 ? 'text-success' : 'text-danger';
-            
+
             return `
                 <tr>
                     <td><strong>${p.period_label}</strong></td>
@@ -566,50 +578,156 @@ export const dashboardModule = {
         document.getElementById('finalCumulativeFooter').innerHTML = formatCurrency(lastCumulative);
     },
 
-    renderCategoryChart(data) {
-        const ctx = document.getElementById('categoryChart').getContext('2d');
+    renderCategoryCharts(data) {
+        // ✅ Gráfica de Ingresos
+        const incomeCtx = document.getElementById('incomeCategoryChart').getContext('2d');
+        const expenseCtx = document.getElementById('expenseCategoryChart').getContext('2d');
 
-        if (this.categoryChartInstance) {
-            this.categoryChartInstance.destroy();
+        // Destruir gráficas anteriores si existen
+        if (this.incomeCategoryChartInstance) {
+            this.incomeCategoryChartInstance.destroy();
+        }
+        if (this.expenseCategoryChartInstance) {
+            this.expenseCategoryChartInstance.destroy();
         }
 
-        // Mostrar top 5 de egresos por categoría
-        const expenseCategories = data.distribution?.expense || [];
-        const topExpenses = expenseCategories.slice(0, 5);
-        
-        const labels = topExpenses.map(c => c.account_name);
-        const values = topExpenses.map(c => c.total);
-        const backgroundColors = ['#dc3545', '#fd7e14', '#ffc107', '#20c997', '#6f42c1'];
+        // ✅ Datos de ingresos
+        const incomeCategories = data.income_categories || [];
+        const incomeLabels = incomeCategories.map(c => c.name);
+        const incomeValues = incomeCategories.map(c => c.total);
+        const incomeColors = incomeCategories.map(c => c.color || '#28a745');
 
-        this.categoryChartInstance = new Chart(ctx, {
-            type: 'pie',
-            data: {
-                labels: labels,
-                datasets: [{
-                    data: values,
-                    backgroundColor: backgroundColors,
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                plugins: {
-                    legend: { position: 'bottom', labels: { font: { size: 10 } } },
-                    tooltip: {
-                        callbacks: {
-                            label: (context) => {
-                                const label = context.label || '';
-                                const value = context.raw || 0;
-                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
-                                return `${label}: ${formatCurrency(value)} (${percentage}%)`;
+        // ✅ Datos de egresos
+        const expenseCategories = data.expense_categories || [];
+        const expenseLabels = expenseCategories.map(c => c.name);
+        const expenseValues = expenseCategories.map(c => c.total);
+        const expenseColors = expenseCategories.map(c => c.color || '#dc3545');
+
+        // ✅ Si no hay datos, mostrar mensaje
+        if (incomeCategories.length === 0 && expenseCategories.length === 0) {
+            // Mostrar mensaje en ambos canvas
+            this.showEmptyChartMessage(incomeCtx, 'No hay ingresos en este período');
+            this.showEmptyChartMessage(expenseCtx, 'No hay egresos en este período');
+            return;
+        }
+
+        // ✅ Crear gráfica de ingresos (solo si hay datos)
+        if (incomeCategories.length > 0) {
+            this.incomeCategoryChartInstance = new Chart(incomeCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: incomeLabels,
+                    datasets: [{
+                        data: incomeValues,
+                        backgroundColor: incomeColors,
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                font: { size: 9 },
+                                padding: 8,
+                                boxWidth: 12
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => {
+                                    const label = context.label || '';
+                                    const value = context.raw || 0;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                    return `${label}: ${formatCurrency(value)} (${percentage}%)`;
+                                }
                             }
                         }
                     }
                 }
-            }
-        });
+            });
+        } else {
+            this.showEmptyChartMessage(incomeCtx, 'No hay ingresos en este período');
+        }
+
+        // ✅ Crear gráfica de egresos (solo si hay datos)
+        if (expenseCategories.length > 0) {
+            this.expenseCategoryChartInstance = new Chart(expenseCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: expenseLabels,
+                    datasets: [{
+                        data: expenseValues,
+                        backgroundColor: expenseColors,
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                font: { size: 9 },
+                                padding: 8,
+                                boxWidth: 12
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => {
+                                    const label = context.label || '';
+                                    const value = context.raw || 0;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                    return `${label}: ${formatCurrency(value)} (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        } else {
+            this.showEmptyChartMessage(expenseCtx, 'No hay egresos en este período');
+        }
+    },
+
+    /**
+     * Mostrar mensaje cuando no hay datos
+     */
+    showEmptyChartMessage(ctx, message) {
+        const canvas = ctx.canvas;
+        const parent = canvas.parentElement;
+
+        // Guardar el canvas original
+        const canvasClone = canvas.cloneNode(true);
+        canvas.style.display = 'none';
+
+        // Eliminar mensaje anterior si existe
+        const existingMsg = parent.querySelector('.empty-chart-message');
+        if (existingMsg) existingMsg.remove();
+
+        // Crear mensaje
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'empty-chart-message';
+        msgDiv.style.cssText = `
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        min-height: 150px;
+        color: #6c757d;
+        font-size: 14px;
+        text-align: center;
+    `;
+        msgDiv.innerHTML = `<i class="bi bi-inbox me-2"></i> ${message}`;
+        parent.appendChild(msgDiv);
     },
 
     renderTransactions(transactions) {
@@ -693,7 +811,7 @@ export const dashboardModule = {
 
         const selectedCompany = this.companies.find(c => c.id == companyId);
         showAlert(`Exportando dashboard de ${selectedCompany?.name}...`, 'info');
-        
+
         // Aquí puedes implementar la exportación a PDF del dashboard
         // Similar a lo que hiciste con los reportes de ingresos/egresos
     },
@@ -704,7 +822,7 @@ export const dashboardModule = {
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
         }
-        
+
         const cards = document.querySelectorAll('#statsCards .card');
         cards.forEach(card => card.style.opacity = '0.6');
     },
@@ -715,7 +833,7 @@ export const dashboardModule = {
             btn.disabled = false;
             btn.innerHTML = '<i class="bi bi-search"></i> Consultar';
         }
-        
+
         const cards = document.querySelectorAll('#statsCards .card');
         cards.forEach(card => card.style.opacity = '1');
     }

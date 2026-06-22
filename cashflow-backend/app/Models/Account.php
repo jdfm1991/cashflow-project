@@ -165,4 +165,76 @@ class Account extends BaseModel
 
         return $stmt->fetchAll();
     }
+
+    // app/Models/Account.php - Agregar estos métodos
+
+    /**
+     * Obtener distribución de transacciones por categoría
+     * 
+     * @param int $companyId ID de la empresa
+     * @param string $type Tipo de transacción ('income' o 'expense')
+     * @param string $startDate Fecha inicio
+     * @param string $endDate Fecha fin
+     * @return array
+     */
+    public function getCategoryDistribution(int $companyId, string $type, string $startDate, string $endDate): array
+    {
+        $table = $type === 'income' ? 'incomes' : 'expenses';
+
+        $sql = "SELECT 
+                c.id as category_id,
+                c.name as category_name,
+                c.color as category_color,
+                c.icon as category_icon,
+                COALESCE(SUM(t.amount_base_currency), 0) as total
+            FROM {$table} t
+            INNER JOIN accounts a ON t.account_id = a.id
+            INNER JOIN categories c ON a.category = c.name
+            WHERE t.company_id = :company_id
+                AND t.date BETWEEN :start_date AND :end_date
+                AND c.type = :type
+                AND c.is_active = 1
+            GROUP BY c.id, c.name, c.color, c.icon
+            ORDER BY total DESC";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([
+            'company_id' => $companyId,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+            'type' => $type
+        ]);
+
+        $results = $stmt->fetchAll();
+        $total = array_sum(array_column($results, 'total'));
+
+        $categories = [];
+        foreach ($results as $row) {
+            $categories[] = [
+                'category_id' => (int) $row['category_id'],
+                'name' => $row['category_name'],
+                'color' => $row['category_color'] ?? '#6c757d',
+                'icon' => $row['category_icon'] ?? 'bi-tag',
+                'total' => (float) $row['total'],
+                'percentage' => $total > 0 ? round(($row['total'] / $total) * 100, 2) : 0
+            ];
+        }
+
+        return $categories;
+    }
+
+    /**
+     * Obtener todas las categorías con sus colores
+     */
+    public function getCategoriesWithColors(): array
+    {
+        $sql = "SELECT id, name, type, color, icon, is_active 
+            FROM categories 
+            WHERE is_active = 1 
+            ORDER BY type, sort_order, name";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute();
+        return $stmt->fetchAll();
+    }
 }

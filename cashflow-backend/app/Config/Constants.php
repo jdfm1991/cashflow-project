@@ -110,7 +110,7 @@ class Constants
         }
 
         if (!defined('JWT_EXPIRATION')) {
-            define('JWT_EXPIRATION', (int)($_ENV['JWT_EXPIRATION'] ?? 3600));
+            define('JWT_EXPIRATION', (int)($_ENV['JWT_EXPIRATION'] ?? 18000));
         }
 
         if (!defined('JWT_ALGORITHM')) {
@@ -137,7 +137,7 @@ class Constants
         }
 
         if (!defined('CACHE_TTL')) {
-            define('CACHE_TTL', 3600); // 1 hora
+            define('CACHE_TTL', 18000); // 6 hora
         }
 
         // Definir constantes de roles de usuario

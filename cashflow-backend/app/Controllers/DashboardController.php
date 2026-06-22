@@ -1,5 +1,4 @@
 <?php
-// app/Controllers/DashboardController.php
 
 declare(strict_types=1);
 
@@ -37,7 +36,7 @@ class DashboardController
     public function getPublicCompanies(): void
     {
         $companies = $this->companyModel->getActiveCompanies();
-        
+
         // Agregar información resumida de cada empresa
         $companiesWithStats = [];
         foreach ($companies as $company) {
@@ -49,7 +48,7 @@ class DashboardController
                 'is_active' => $company['is_active']
             ];
         }
-        
+
         Response::success($companiesWithStats);
     }
 
@@ -66,7 +65,6 @@ class DashboardController
             return;
         }
 
-        // Verificar que la empresa existe y está activa
         $company = $this->companyModel->find($companyId);
         if (!$company || !$company['is_active']) {
             Response::notFound('Empresa no encontrada o inactiva');
@@ -79,7 +77,7 @@ class DashboardController
         $startDate = $this->validateDate($startDate) ? $startDate : date('Y-m-01');
         $endDate = $this->validateDate($endDate) ? $endDate : date('Y-m-t');
 
-        // Obtener estadísticas por empresa
+        // ✅ Usar los modelos para obtener totales
         $totalIncome = (float) $this->incomeModel->getTotalByCompany($companyId, $startDate, $endDate);
         $totalExpense = (float) $this->expenseModel->getTotalByCompany($companyId, $startDate, $endDate);
         $balance = $totalIncome - $totalExpense;
@@ -194,6 +192,12 @@ class DashboardController
         $startDate = $this->validateDate($startDate) ? $startDate : date('Y-m-01');
         $endDate = $this->validateDate($endDate) ? $endDate : date('Y-m-t');
 
+        // ✅ Usar el modelo Account para obtener distribución por categorías
+        $accountModel = new Account();
+
+        $incomeCategories = $accountModel->getCategoryDistribution($companyId, 'income', $startDate, $endDate);
+        $expenseCategories = $accountModel->getCategoryDistribution($companyId, 'expense', $startDate, $endDate);
+
         Response::success([
             'company' => [
                 'id' => $company['id'],
@@ -203,10 +207,8 @@ class DashboardController
                 'start_date' => $startDate,
                 'end_date' => $endDate
             ],
-            'distribution' => [
-                'income' => $this->incomeModel->getCategoryDistributionByCompany($companyId, $startDate, $endDate),
-                'expense' => $this->expenseModel->getCategoryDistributionByCompany($companyId, $startDate, $endDate)
-            ]
+            'income_categories' => $incomeCategories,
+            'expense_categories' => $expenseCategories
         ]);
     }
 
@@ -287,7 +289,7 @@ class DashboardController
             $income = (float) $this->incomeModel->getTotalByCompany($companyId, $period['start'], $period['end']);
             $expense = (float) $this->expenseModel->getTotalByCompany($companyId, $period['start'], $period['end']);
             $netCashFlow = $income - $expense;
-            
+
             $cashFlowData[] = [
                 'period_label' => $period['label'],
                 'start_date' => $period['start'],
@@ -363,24 +365,24 @@ class DashboardController
             // Super admin viendo todas las empresas
             $totalIncome = (float) $this->incomeModel->getTotalGlobal($startDate, $endDate);
             $totalExpense = (float) $this->expenseModel->getTotalGlobal($startDate, $endDate);
-            
+
             $lastMonthStart = date('Y-m-01', strtotime('-1 month', strtotime($startDate)));
             $lastMonthEnd = date('Y-m-t', strtotime('-1 month', strtotime($endDate)));
             $lastMonthIncome = (float) $this->incomeModel->getTotalGlobal($lastMonthStart, $lastMonthEnd);
             $lastMonthExpense = (float) $this->expenseModel->getTotalGlobal($lastMonthStart, $lastMonthEnd);
-            
+
             $allTimeIncome = (float) $this->incomeModel->getTotalGlobal('1970-01-01', date('Y-m-d'));
             $allTimeExpense = (float) $this->expenseModel->getTotalGlobal('1970-01-01', date('Y-m-d'));
         } else {
             // Empresa específica
             $totalIncome = (float) $this->incomeModel->getTotalByCompany($targetCompanyId, $startDate, $endDate);
             $totalExpense = (float) $this->expenseModel->getTotalByCompany($targetCompanyId, $startDate, $endDate);
-            
+
             $lastMonthStart = date('Y-m-01', strtotime('-1 month', strtotime($startDate)));
             $lastMonthEnd = date('Y-m-t', strtotime('-1 month', strtotime($endDate)));
             $lastMonthIncome = (float) $this->incomeModel->getTotalByCompany($targetCompanyId, $lastMonthStart, $lastMonthEnd);
             $lastMonthExpense = (float) $this->expenseModel->getTotalByCompany($targetCompanyId, $lastMonthStart, $lastMonthEnd);
-            
+
             $allTimeIncome = (float) $this->incomeModel->getTotalByCompany($targetCompanyId, '1970-01-01', date('Y-m-d'));
             $allTimeExpense = (float) $this->expenseModel->getTotalByCompany($targetCompanyId, '1970-01-01', date('Y-m-d'));
         }
@@ -434,7 +436,7 @@ class DashboardController
             $labels[] = $date->format('M Y');
             $income = (float) $this->incomeModel->getTotalByCompany($companyId, $monthStart, $monthEnd);
             $expense = (float) $this->expenseModel->getTotalByCompany($companyId, $monthStart, $monthEnd);
-            
+
             $incomeData[] = $income;
             $expenseData[] = $expense;
             $balanceData[] = $income - $expense;
@@ -453,7 +455,7 @@ class DashboardController
         $periods = [];
         $current = new DateTime($startDate);
         $end = new DateTime($endDate);
-        
+
         switch ($groupBy) {
             case 'week':
                 while ($current <= $end) {
@@ -461,7 +463,7 @@ class DashboardController
                     $weekEnd = clone $current;
                     $weekEnd->modify('+6 days');
                     if ($weekEnd > $end) $weekEnd = clone $end;
-                    
+
                     $periods[] = [
                         'label' => 'Semana ' . $weekStart->format('W') . ' (' . $weekStart->format('d/m') . ' - ' . $weekEnd->format('d/m') . ')',
                         'start' => $weekStart->format('Y-m-d'),
@@ -470,7 +472,7 @@ class DashboardController
                     $current->modify('+7 days');
                 }
                 break;
-                
+
             case 'month':
                 while ($current <= $end) {
                     $monthStart = clone $current;
@@ -478,7 +480,7 @@ class DashboardController
                     $monthEnd = clone $current;
                     $monthEnd->modify('last day of this month');
                     if ($monthEnd > $end) $monthEnd = clone $end;
-                    
+
                     $periods[] = [
                         'label' => $current->format('M Y'),
                         'start' => $monthStart->format('Y-m-d'),
@@ -487,7 +489,7 @@ class DashboardController
                     $current->modify('+1 month');
                 }
                 break;
-                
+
             case 'quarter':
                 while ($current <= $end) {
                     $quarter = ceil($current->format('n') / 3);
@@ -500,7 +502,7 @@ class DashboardController
                     $current->modify('+3 months');
                 }
                 break;
-                
+
             case 'year':
                 while ($current <= $end) {
                     $year = $current->format('Y');
@@ -512,7 +514,7 @@ class DashboardController
                     $current->modify('+1 year');
                 }
                 break;
-                
+
             default:
                 while ($current <= $end) {
                     $periods[] = [
@@ -524,7 +526,7 @@ class DashboardController
                 }
                 break;
         }
-        
+
         return $periods;
     }
 

@@ -117,4 +117,21 @@ class Category extends BaseModel
 
         return $stmt->fetchAll();
     }
+
+    // app/Models/Category.php - Agregar este método
+
+    /**
+     * Obtener todas las categorías con sus colores
+     */
+    public function getAllWithColors(): array
+    {
+        $sql = "SELECT id, name, type, color, icon, is_active 
+            FROM {$this->table} 
+            WHERE is_active = 1 
+            ORDER BY type, sort_order, name";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute();
+        return $stmt->fetchAll();
+    }
 }
